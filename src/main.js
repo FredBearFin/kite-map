@@ -2,7 +2,8 @@ import './style.css';
 import maplibregl from 'maplibre-gl';
 import { layers, namedFlavor } from '@protomaps/basemaps';
 import { backend } from './backend.js';
-import { DIRS16, bboxIntersects } from './geo.js';
+import { DIRS16, bboxIntersects, bboxOf } from './geo.js';
+import { lakesFromWater, bboxOverlap } from './osmwater.js';
 import { bestDirs, dayVerdict, estimateDriveHours, iceMonths } from './scoring.js';
 import { registerProtocol, glyphsTemplate, assetUrl, ASSETS, status, tileTemplate, initBasemap, prefetchWorld } from './tiles.js';
 import { HYDROLAKES_PAGE, HYDROLAKES_URL, lakeIndex, downloadWind, windCellKey, cellsFor, distanceFromHome, driveRoute, filterBbox, forecast, forecastMany, getWind, lakeCenter, loadCell, pointInLake, scoreFeatures } from './lakes.js';
@@ -152,6 +153,14 @@ async function init() {
     backend.kvSet('view', { center: map.getCenter().toArray(), zoom: map.getZoom() });
     if ($('f-view').checked) renderSpots();
     refreshView();
+    needOsm = true;
+  });
+  // Once the tiles in view have loaded, pick up the lakes drawn on them.
+  let needOsm = true;
+  map.on('idle', () => {
+    if (!needOsm) return;
+    needOsm = false;
+    addOsmLakes().catch((e) => console.warn('osm lakes', e));
   });
   await loadRegions();
   renderHome();
@@ -174,7 +183,9 @@ async function init() {
 
 // Lakes are loaded by 10-degree cell from the local lake database: every
 // cell in view, plus the cells of downloaded regions.
-const MIN_AREA = 0.3; // km²
+const MIN_AREA = 0.25; // km² (the import keeps HydroLAKES lakes from 0.25 km²)
+const MIN_OSM_AREA = 0.1; // km², about 300 x 330 m: the smallest water worth a look
+const osmLakes = new Map(); // id -> lake built from OpenStreetMap water in the basemap
 const loadedCells = new Map(); // cell -> features
 let loadingCells = false;
 
@@ -193,11 +204,71 @@ async function ensureCells(cells) {
   } finally {
     loadingCells = false;
   }
-  state.lakes = [...loadedCells.values()].flat();
+  publishLakes();
+  return true;
+}
+
+function publishLakes() {
+  state.lakes = [...loadedCells.values()].flat().concat([...osmLakes.values()]);
   state.byId = new Map(state.lakes.map((f) => [f.properties.id, f]));
   map.getSource('lakes')?.setData(fc(state.lakes));
   renderSpots();
-  return true;
+}
+
+const sameLake = (a, b) => bboxOverlap(a, b) > 0.5 && bboxOverlap(b, a) > 0.5;
+
+function setShape(f, geometry, z) {
+  f.geometry = geometry;
+  for (const k of ['_fetch', '_bbox', '_c']) delete f.properties[k];
+  f.properties._z = z;
+  lakeCenter(f);
+}
+
+/**
+ * Add every lake drawn on the basemap in view (OpenStreetMap water), not just
+ * the HydroLAKES ones: sandpits, small reservoirs and city lakes. A lake that is
+ * also in HydroLAKES keeps its HydroLAKES data but gets the sharper OSM outline.
+ */
+let osmBusy = false;
+async function addOsmLakes() {
+  const z = Math.floor(map.getZoom());
+  if (osmBusy || z < 9 || !map.getSource('protomaps')) return;
+  osmBusy = true;
+  try {
+    const raw = map.querySourceFeatures('protomaps', { sourceLayer: 'water' });
+    const found = lakesFromWater(raw, viewBbox(), MIN_OSM_AREA);
+    const hydro = [...loadedCells.values()].flat();
+    const fresh = [];
+    for (const f of found) {
+      const fb = bboxOf(f.geometry);
+      const h = hydro.find((h) => sameLake(lakeCenter(h) && h.properties._bbox, fb));
+      if (h) {
+        if ((h.properties._z ?? -1) < z) {
+          setShape(h, f.geometry, z);
+          fresh.push(h);
+        }
+        continue;
+      }
+      let skip = false;
+      for (const [id, o] of osmLakes) {
+        if (!sameLake(o.properties._bbox, fb)) continue;
+        if (o.properties._z >= z) skip = true;
+        else osmLakes.delete(id);
+      }
+      if (skip) continue;
+      lakeCenter(f);
+      f.properties._z = z;
+      osmLakes.set(f.properties.id, f);
+      fresh.push(f);
+    }
+    if (!fresh.length) return;
+    await attachWaterColors(fresh);
+    await scoreFeatures(fresh, state.mode);
+    publishLakes();
+    autoWind();
+  } finally {
+    osmBusy = false;
+  }
 }
 
 async function rescoreAll() {
@@ -214,7 +285,7 @@ function viewBbox() {
 /** Load lakes for what's on screen, and wind for it when online. */
 async function refreshView() {
   const idx = await lakeIndex();
-  if (!idx) return setBanner('No lakes loaded yet. Go to the Regions tab and click "Import lake zip" to load every lake in the world.', 'regions');
+  if (!idx) return setBanner('Showing the lakes drawn on the map. For depth data and lakes at every zoom, go to Regions and click "Import lake zip".', 'regions');
   if (map.getZoom() < 5) return setBanner('Zoom in to see lakes and their kite scores.');
   const cells = cellsFor(viewBbox()).filter((c) => idx.cells[c]);
   if (cells.length > 6) return setBanner('Zoom in a little more to load lakes.');
@@ -230,7 +301,7 @@ async function autoWind() {
   const vb = viewBbox();
   const pts = new Set();
   for (const f of state.lakes) {
-    if (f.properties.basis !== 'shape' || f.properties.a < 1) continue;
+    if (f.properties.basis !== 'shape' || f.properties.a < 0.2) continue;
     const [lon, lat] = lakeCenter(f);
     if (lon >= vb[0] && lon <= vb[2] && lat >= vb[1] && lat <= vb[3]) pts.add(windCellKey(lat, lon));
     if (pts.size >= 24) break;
@@ -395,7 +466,7 @@ async function showLakePopup(f, lngLat) {
   const el = document.createElement('div');
   el.className = 'pop';
   el.innerHTML = `<h4></h4>
-    <div class="sub">${p.t === 2 ? 'Reservoir' : 'Lake'}${p.c ? ' · ' + p.c : ''}</div>
+    <div class="sub">${p.t === 2 ? 'Reservoir' : 'Lake'}${p.c ? ' · ' + p.c : ''}${p.src === 'osm' ? ' · from OpenStreetMap' : ''}</div>
     <div class="sub drive">~${fmtH(estimateDriveHours(d))} drive (${fmtMi(d)} straight line) from ${esc(state.home.name)}</div>
     <div style="margin:4px 0">${badges(p, wind)}</div>
     <div class="rose">${roseSvg(wind, suit)}
