@@ -1,6 +1,9 @@
 name: Build lake data pack
 
 on:
+  push:
+    branches: [main]
+    paths: ["data-pipeline/**", ".github/workflows/lakes-data.yml"]
   workflow_dispatch:
     inputs:
       min_area_km2:
@@ -27,7 +30,7 @@ jobs:
           unzip -q hl.zip
           find . -name "*.shp"
       - name: Build cells
-        run: python data-pipeline/build_lakes.py "$(find work -name 'HydroLAKES_polys_v10.shp' | head -1)" out "${{ inputs.min_area_km2 }}"
+        run: python data-pipeline/build_lakes.py "$(find work -name 'HydroLAKES_polys_v10.shp' | head -1)" out "${{ inputs.min_area_km2 || '0.25' }}"
       - name: Publish release lakes-v1
         env:
           GH_TOKEN: ${{ github.token }}
