@@ -156,6 +156,17 @@ export const backend = {
     return listen('lakes-progress', (e) => cb(e.payload));
   },
 
+  async call(cmd, args) {
+    if (!isTauri) throw new Error('Needs the desktop app.');
+    return invoke(cmd, args);
+  },
+
+  async listen(event, cb) {
+    if (!isTauri) return () => {};
+    const { listen } = await import('@tauri-apps/api/event');
+    return listen(event, (e) => cb(e.payload));
+  },
+
   async dataFolder() {
     return isTauri ? invoke('data_folder') : '(browser memory)';
   },

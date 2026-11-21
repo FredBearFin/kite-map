@@ -76,7 +76,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * Download one year of hourly wind (ERA5 via Open-Meteo) for grid points and
  * save kiteable-hour stats. Points already saved are skipped.
  */
-export async function downloadWind(points, onProgress, signal) {
+export async function downloadWind(points, onProgress, signal, { retries = 4 } = {}) {
   const todo = [];
   for (const k of points) {
     const w = await backend.kvGet('wind/' + k);
@@ -99,7 +99,7 @@ export async function downloadWind(points, onProgress, signal) {
         res = await backend.httpJson(url);
         break;
       } catch (e) {
-        if (attempt >= 4 || signal?.aborted) throw e;
+        if (attempt >= retries || signal?.aborted) throw e;
         onProgress?.(i, todo.length, 'Wind service is busy, waiting a minute...');
         await sleep(60000);
       }
@@ -168,7 +168,10 @@ export function lakeCenter(f) {
 }
 
 export async function scoreFeatures(features, mode = 'water') {
+  let n = 0;
   for (const f of features) {
+    // Let the window repaint while scoring thousands of lakes.
+    if (++n % 400 === 0) await new Promise((r) => setTimeout(r, 0));
     const [lon, lat] = lakeCenter(f);
     const fetch8 = lakeShape(f);
     const wind = await getWind(lat, lon);

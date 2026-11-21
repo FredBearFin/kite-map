@@ -79,3 +79,4 @@ progress { width: 100%; }
 .badge.good { background: #dff3e4; color: #1e6b34; }
 .box { border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; margin-bottom: 12px; background: var(--bg); }
 .box code { font-size: 11px; }
+.banner { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 5; background: #1d2733; color: #fff; padding: 8px 14px; border-radius: 6px; font-size: 13px; max-width: 70%; box-shadow: 0 2px 10px rgba(0,0,0,.2); }

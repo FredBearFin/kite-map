@@ -4,8 +4,8 @@ import { layers, namedFlavor } from '@protomaps/basemaps';
 import { backend } from './backend.js';
 import { DIRS16, bboxIntersects } from './geo.js';
 import { bestDirs, dayVerdict, estimateDriveHours, iceMonths } from './scoring.js';
-import { registerProtocol, glyphsTemplate, assetUrl, ASSETS, status } from './tiles.js';
-import { HYDROLAKES_PAGE, HYDROLAKES_URL, lakeIndex, cellsFor, distanceFromHome, driveRoute, filterBbox, forecast, forecastMany, getWind, lakeCenter, loadCell, pointInLake, scoreFeatures } from './lakes.js';
+import { registerProtocol, glyphsTemplate, assetUrl, ASSETS, status, tileTemplate, initBasemap, prefetchWorld } from './tiles.js';
+import { HYDROLAKES_PAGE, HYDROLAKES_URL, lakeIndex, downloadWind, windCellKey, cellsFor, distanceFromHome, driveRoute, filterBbox, forecast, forecastMany, getWind, lakeCenter, loadCell, pointInLake, scoreFeatures } from './lakes.js';
 import { KNOWN_SPOTS } from './known-spots.js';
 import { attachWaterColors } from './watercolor.js';
 import { downloadRegion, estimate, DEFAULTS } from './download.js';
@@ -28,6 +28,8 @@ const state = {
 // ---------- Map ----------
 
 registerProtocol();
+// Pick the basemap build first (instant when it was checked in the last week).
+await Promise.race([initBasemap(), new Promise((r) => setTimeout(r, 4000))]);
 
 function buildStyle() {
   const base = layers('protomaps', namedFlavor('light'), { lang: 'en' });
@@ -52,15 +54,15 @@ function buildStyle() {
     sources: {
       protomaps: {
         type: 'vector',
-        tiles: ['kt://osm/{z}/{x}/{y}'],
+        tiles: [tileTemplate('osm')],
         maxzoom: 14,
         attribution: '© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>, Protomaps',
       },
-      dem: { type: 'raster-dem', tiles: ['kt://dem/{z}/{x}/{y}'], tileSize: 256, maxzoom: 12, encoding: 'terrarium' },
-      geo: { type: 'raster', tiles: ['kt://geo/{z}/{x}/{y}'], tileSize: 256, maxzoom: 12, attribution: 'Macrostrat' },
+      dem: { type: 'raster-dem', tiles: [tileTemplate('dem')], tileSize: 256, maxzoom: 12, encoding: 'terrarium' },
+      geo: { type: 'raster', tiles: [tileTemplate('geo')], tileSize: 256, maxzoom: 12, attribution: 'Macrostrat' },
       sat: {
         type: 'raster',
-        tiles: ['kt://sat/{z}/{x}/{y}'],
+        tiles: [tileTemplate('sat')],
         tileSize: 256,
         maxzoom: 14,
         attribution: '<a href="https://s2maps.eu">Sentinel-2 cloudless 2024</a> by EOX (modified Copernicus Sentinel data)',
@@ -149,6 +151,7 @@ async function init() {
   map.on('moveend', () => {
     backend.kvSet('view', { center: map.getCenter().toArray(), zoom: map.getZoom() });
     if ($('f-view').checked) renderSpots();
+    refreshView();
   });
   await loadRegions();
   renderHome();
@@ -157,6 +160,9 @@ async function init() {
   renderForecast();
   $('folder').textContent = 'Data folder: ' + (await backend.dataFolder());
   await renderLakeDb();
+  await renderWorld();
+  const planet = backend.isTauri ? await backend.call('planet_status').catch(() => null) : null;
+  if (navigator.onLine && !planet?.complete) prefetchWorld();
   if (!(await lakeIndex())) {
     switchTab('regions');
     toast('Welcome! First set up the lake database: click "Import lake zip" and choose HydroLAKES_polys_v10_shp.zip.', 10000);
@@ -166,26 +172,104 @@ async function init() {
   }
 }
 
-async function loadRegions() {
-  state.regions = (await backend.kvList('region/')).map(([, v]) => v).sort((a, b) => a.downloaded - b.downloaded);
-  const seen = new Map();
-  for (const r of state.regions) {
-    for (const cell of cellsFor(r.bbox)) {
-      const feats = await loadCell(cell);
-      for (const f of filterBbox(feats, r.bbox)) {
-        if (f.properties.a < (r.options?.minAreaKm2 ?? DEFAULTS.minAreaKm2)) continue;
-        if (!seen.has(f.properties.id)) seen.set(f.properties.id, f);
-      }
+// Lakes are loaded by 10-degree cell from the local lake database: every
+// cell in view, plus the cells of downloaded regions.
+const MIN_AREA = 0.3; // km²
+const loadedCells = new Map(); // cell -> features
+let loadingCells = false;
+
+async function ensureCells(cells) {
+  const missing = cells.filter((c) => !loadedCells.has(c));
+  if (!missing.length || loadingCells) return false;
+  loadingCells = true;
+  try {
+    for (const cell of missing) {
+      setBanner(`Loading lakes (${cell.toUpperCase()})...`);
+      const feats = (await loadCell(cell)).filter((f) => f.properties.a >= MIN_AREA);
+      await attachWaterColors(feats);
+      await scoreFeatures(feats, state.mode);
+      loadedCells.set(cell, feats);
     }
+  } finally {
+    loadingCells = false;
   }
-  state.lakes = [...seen.values()];
-  await attachWaterColors(state.lakes);
-  await scoreFeatures(state.lakes, state.mode);
+  state.lakes = [...loadedCells.values()].flat();
   state.byId = new Map(state.lakes.map((f) => [f.properties.id, f]));
   map.getSource('lakes')?.setData(fc(state.lakes));
+  renderSpots();
+  return true;
+}
+
+async function rescoreAll() {
+  await scoreFeatures(state.lakes, state.mode);
+  map.getSource('lakes')?.setData(fc(state.lakes));
+  renderSpots();
+}
+
+function viewBbox() {
+  const b = map.getBounds();
+  return [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()];
+}
+
+/** Load lakes for what's on screen, and wind for it when online. */
+async function refreshView() {
+  const idx = await lakeIndex();
+  if (!idx) return setBanner('No lakes loaded yet. Go to the Regions tab and click "Import lake zip" to load every lake in the world.', 'regions');
+  if (map.getZoom() < 5) return setBanner('Zoom in to see lakes and their kite scores.');
+  const cells = cellsFor(viewBbox()).filter((c) => idx.cells[c]);
+  if (cells.length > 6) return setBanner('Zoom in a little more to load lakes.');
+  await ensureCells(cells);
+  setBanner(null);
+  autoWind();
+}
+
+let windBusy = false;
+/** When online, fetch wind history for the lakes on screen (a few points at a time). */
+async function autoWind() {
+  if (windBusy || !navigator.onLine || map.getZoom() < 7) return;
+  const vb = viewBbox();
+  const pts = new Set();
+  for (const f of state.lakes) {
+    if (f.properties.basis !== 'shape' || f.properties.a < 1) continue;
+    const [lon, lat] = lakeCenter(f);
+    if (lon >= vb[0] && lon <= vb[2] && lat >= vb[1] && lat <= vb[3]) pts.add(windCellKey(lat, lon));
+    if (pts.size >= 24) break;
+  }
+  if (!pts.size) return;
+  windBusy = true;
+  try {
+    await downloadWind([...pts], (d, t) => setBanner(`Getting wind history for this area: ${d} of ${t} points...`), null, { retries: 0 });
+    await rescoreAll();
+  } catch {
+  } finally {
+    windBusy = false;
+    setBanner(null);
+  }
+}
+
+function setBanner(text, tab) {
+  const el = $('banner');
+  if (!text) return void (el.hidden = true);
+  el.textContent = text;
+  el.hidden = false;
+  el.onclick = tab ? () => switchTab(tab) : null;
+  el.style.cursor = tab ? 'pointer' : '';
+}
+
+async function loadRegions() {
+  state.regions = (await backend.kvList('region/')).map(([, v]) => v).sort((a, b) => a.downloaded - b.downloaded);
+  loadedCells.clear();
+  const cells = new Set(state.regions.flatMap((r) => cellsFor(r.bbox)));
+  if (await lakeIndex()) await ensureCells([...cells]);
+  else {
+    state.lakes = [];
+    state.byId = new Map();
+    map.getSource('lakes')?.setData(fc([]));
+    renderSpots();
+  }
   map.getSource('regions')?.setData(fc(state.regions.map((r) => boxFeature(r.bbox))));
   renderRegions();
-  renderSpots();
+  await refreshView();
 }
 
 // ---------- Tabs ----------
@@ -233,15 +317,13 @@ function renderSpots() {
     ? `${list.length} of ${state.lakes.length} lakes shown, best first, from ${state.home.name}.` +
       (state.mode === 'snow' ? ' Snowkite mode ranks lakes by open space and wind in months when they are likely frozen.' : '') +
       (state.mode === 'beginner' ? ' Beginner mode counts only lighter 12 to 22 kn wind.' : '')
-    : 'No lakes yet. Download a region in the Regions tab.';
+    : 'No lakes loaded. Import the lake database in the Regions tab, then zoom the map to any area.';
 }
 ['f-area', 'f-drive', 'f-name', 'f-view'].forEach((id) => $(id).addEventListener('input', renderSpots));
 $('f-mode').addEventListener('change', async () => {
   state.mode = $('f-mode').value;
   await backend.kvSet('mode', state.mode);
-  await scoreFeatures(state.lakes, state.mode);
-  map.getSource('lakes')?.setData(fc(state.lakes));
-  renderSpots();
+  await rescoreAll();
 });
 
 const fmtH = (h) => (h < 1 ? Math.round(h * 60) + ' min' : h.toFixed(1).replace('.0', '') + ' h');
@@ -753,6 +835,58 @@ $('dl-start').onclick = async () => {
     state.drawBox = null;
   }
 };
+// ---------- World map ----------
+
+const fmtBytes = (b) => (b >= 1073741824 ? (b / 1073741824).toFixed(1) + ' GB' : Math.round(b / 1048576) + ' MB');
+const ZOOM_NAMES = { 8: 'Overview', 10: 'Standard', 12: 'Detailed' };
+
+async function renderWorld() {
+  if (!backend.isTauri) return ($('world-status').textContent = 'Available in the desktop app.');
+  const p = await backend.call('planet_status').catch(() => null);
+  $('world-status').textContent =
+    p && p.complete
+      ? `Downloaded: ${ZOOM_NAMES[p.maxzoom] || 'zoom ' + p.maxzoom} world map (${fmtBytes(p.data_bytes)}). The whole planet works offline at this detail.`
+      : p
+        ? `Paused at part of the ${ZOOM_NAMES[p.maxzoom] || ''} world map. Click Check size, then Download to resume.`
+        : 'Not downloaded. Download the whole planet once, so the map works anywhere with no internet.';
+}
+
+$('world-size').onclick = async () => {
+  $('world-go').hidden = true;
+  $('world-status').textContent = 'Checking size...';
+  try {
+    const info = await backend.call('planet_info', { maxzoom: +$('world-zoom').value });
+    $('world-status').textContent = `${ZOOM_NAMES[info.maxzoom]} world map: ${fmtBytes(info.bytes)} (OpenStreetMap build ${info.build.slice(0, 8)}).`;
+    $('world-go').hidden = false;
+  } catch (e) {
+    $('world-status').textContent = 'Could not check: ' + e;
+  }
+};
+$('world-zoom').onchange = () => ($('world-go').hidden = true);
+
+$('world-go').onclick = async () => {
+  $('world-go').hidden = true;
+  $('world-size').disabled = true;
+  $('world-progress').hidden = false;
+  const stop = await backend.listen('planet-progress', ({ stage, done, total }) => {
+    $('world-step').textContent = stage === 'index' ? 'Downloading the map index...' : `Downloading world map: ${fmtBytes(done)} of ${fmtBytes(total)}`;
+    $('world-bar').value = total ? done / total : 0;
+  });
+  try {
+    await backend.call('planet_download', { maxzoom: +$('world-zoom').value });
+    toast('World map downloaded. The map now works anywhere offline.', 8000);
+    map.getSource('protomaps')?.setTiles([tileTemplate('osm')]);
+  } catch (e) {
+    toast(String(e).includes('cancelled') ? 'Paused. Click Download again to resume.' : 'World map download failed: ' + e, 9000);
+  } finally {
+    stop();
+    $('world-progress').hidden = true;
+    $('world-size').disabled = false;
+    renderWorld();
+  }
+};
+$('world-stop').onclick = () => backend.call('planet_cancel');
+
 // ---------- Lake database ----------
 
 async function renderLakeDb() {
@@ -763,7 +897,6 @@ async function renderLakeDb() {
     : `<b>Needed once:</b> the HydroLAKES lake file (820 MB zip). If you already downloaded <code>HydroLAKES_polys_v10_shp.zip</code>, click <b>Import lake zip</b> and choose it. Otherwise click <b>Download it</b>, or get it from <a href="${HYDROLAKES_PAGE}" target="_blank">hydrosheds.org</a> ("Lake polygons ... shapefile format").`;
   $('lakedb-import').textContent = idx ? 'Re-import lake zip' : 'Import lake zip';
   $('lakedb-download').hidden = !!idx;
-  $('draw').disabled = !idx;
 }
 
 let lakeJobBusy = false;
@@ -868,4 +1001,4 @@ function toast(msg, ms = 4000) {
   toastTimer = setTimeout(() => (t.hidden = true), ms);
 }
 
-window.__kite = { state, map, status };
+window.__kite = { state, map, status, backend };

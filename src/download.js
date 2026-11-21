@@ -89,9 +89,10 @@ export async function downloadRegion(region, progress, signal) {
   const report = { failed: 0 };
 
   // 1. Lakes (from the local lake database)
-  if (!(await lakeIndex())) throw new Error('Set up the lake database first (Regions tab, "Import lake zip").');
+  // Without the lake database the area still downloads its map, terrain and fonts.
+  const haveLakes = !!(await lakeIndex());
   progress('Lakes', 0, 1);
-  const cells = cellsFor(bbox);
+  const cells = haveLakes ? cellsFor(bbox) : [];
   let lakes = [];
   for (let i = 0; i < cells.length; i++) {
     if (signal?.aborted) throw new Error('cancelled');

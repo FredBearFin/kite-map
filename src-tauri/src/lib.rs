@@ -6,6 +6,7 @@
 //! already saved keeps working.
 
 mod lakes_import;
+mod tiles;
 
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -15,9 +16,10 @@ use serde::Serialize;
 use tauri::ipc::{InvokeBody, Request, Response};
 use tauri::{Manager, State};
 
-struct AppState {
+pub(crate) struct AppState {
     db: Mutex<Connection>,
     http: reqwest::Client,
+    planet_cancel: std::sync::atomic::AtomicBool,
 }
 
 fn now() -> i64 {
@@ -45,14 +47,14 @@ fn open_db(path: &std::path::Path) -> rusqlite::Result<Connection> {
     Ok(conn)
 }
 
-fn db_get(state: &AppState, key: &str) -> Result<Option<Vec<u8>>, String> {
+pub(crate) fn db_get(state: &AppState, key: &str) -> Result<Option<Vec<u8>>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     db.query_row("SELECT data FROM blobs WHERE key=?1", [key], |r| r.get(0))
         .optional()
         .map_err(|e| e.to_string())
 }
 
-fn db_put(state: &AppState, key: &str, data: &[u8]) -> Result<(), String> {
+pub(crate) fn db_put(state: &AppState, key: &str, data: &[u8]) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     db.execute(
         "INSERT OR REPLACE INTO blobs (key, data, ts) VALUES (?1, ?2, ?3)",
@@ -292,6 +294,43 @@ async fn lakes_download(app: tauri::AppHandle, state: State<'_, AppState>, url: 
     result
 }
 
+/// Tell the tile server which Protomaps build to read basemap tiles from.
+#[tauri::command]
+fn set_basemap(bm: State<'_, tiles::BasemapState>, url: String, build: String) {
+    tiles::set_basemap(&bm, url, build);
+}
+
+#[derive(Serialize)]
+struct PlanetInfo {
+    build: String,
+    maxzoom: u8,
+    bytes: u64,
+}
+
+/// How big the world map download is up to this zoom (needs internet).
+#[tauri::command]
+async fn planet_info(app: tauri::AppHandle, maxzoom: u8) -> Result<PlanetInfo, String> {
+    let p = tiles::planet_plan(&app, maxzoom).await?;
+    Ok(PlanetInfo { build: p.build, maxzoom, bytes: p.data_bytes })
+}
+
+#[tauri::command]
+async fn planet_download(app: tauri::AppHandle, maxzoom: u8) -> Result<tiles::Planet, String> {
+    let state = app.state::<AppState>();
+    state.planet_cancel.store(false, std::sync::atomic::Ordering::Relaxed);
+    tiles::planet_download(&app, maxzoom, &state.planet_cancel).await
+}
+
+#[tauri::command]
+fn planet_cancel(state: State<'_, AppState>) {
+    state.planet_cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+#[tauri::command]
+fn planet_status(app: tauri::AppHandle) -> Option<tiles::Planet> {
+    tiles::planet_status(&app)
+}
+
 #[tauri::command]
 fn data_folder(app: tauri::AppHandle) -> Result<String, String> {
     app.path()
@@ -303,6 +342,13 @@ fn data_folder(app: tauri::AppHandle) -> Result<String, String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .register_asynchronous_uri_scheme_protocol("ktiles", |ctx, request, responder| {
+            let app = ctx.app_handle().clone();
+            let path = request.uri().path().to_string();
+            tauri::async_runtime::spawn(async move {
+                responder.respond(tiles::serve(&app, &path).await);
+            });
+        })
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
@@ -312,7 +358,9 @@ pub fn run() {
                 .connect_timeout(std::time::Duration::from_secs(15))
                 .timeout(std::time::Duration::from_secs(120))
                 .build()?;
-            app.manage(AppState { db: Mutex::new(db), http });
+            app.manage(AppState { db: Mutex::new(db), http, planet_cancel: Default::default() });
+            app.manage(tiles::BasemapState::default());
+            tiles::load_planet(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -328,6 +376,11 @@ pub fn run() {
             kv_list,
             data_folder,
             lakes_import,
+            set_basemap,
+            planet_info,
+            planet_download,
+            planet_cancel,
+            planet_status,
             lakes_download
         ])
         .run(tauri::generate_context!())

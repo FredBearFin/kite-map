@@ -111,8 +111,48 @@ async function resetBuild() {
 
 const tileKey = (layer, z, x, y) => `t/${layer}/${z}/${x}/${y}`;
 
-/** Fetch one tile into the store (if not there). Returns the bytes or null. */
+// In the desktop app, tiles come from the native "ktiles" scheme: saved tiles
+// are read straight from the database without passing through JavaScript.
+const isWindows = /Windows/.test(navigator.userAgent);
+export const NATIVE_TILES = backend.isTauri;
+const NATIVE_BASE = isWindows ? 'http://ktiles.localhost' : 'ktiles://localhost';
+
+/** URL template for a tile layer (osm, dem, geo, sat) for MapLibre. */
+export function tileTemplate(layer) {
+  return NATIVE_TILES ? `${NATIVE_BASE}/${layer}/{z}/{x}/{y}` : `kt://${layer}/{z}/{x}/{y}`;
+}
+
+/** Choose the basemap build and hand it to the native tile server. */
+export async function initBasemap() {
+  if (!NATIVE_TILES) return;
+  const { invoke } = await import('@tauri-apps/api/core');
+  const build = await currentBuild();
+  if (build) await invoke('set_basemap', { url: BUILD_BASE + build, build });
+}
+
+/** Save the world at low zoom (z0-4, about 340 tiles) so zooming out is instant offline. */
+export async function prefetchWorld() {
+  const list = [];
+  for (let z = 0; z <= 4; z++) for (let x = 0; x < 2 ** z; x++) for (let y = 0; y < 2 ** z; y++) list.push([z, x, y]);
+  const has = await backend.cacheHas(list.map(([z, x, y]) => tileKey('osm', z, x, y)));
+  const todo = list.filter((_, i) => !has[i]);
+  let i = 0;
+  const worker = async () => {
+    while (i < todo.length) {
+      const t = todo[i++];
+      try { await fetchTile('osm', ...t); } catch {}
+    }
+  };
+  await Promise.all(Array.from({ length: 6 }, worker));
+}
+
+/** Fetch one tile into the store (if not there). Returns the bytes. */
 export async function fetchTile(layer, z, x, y) {
+  if (NATIVE_TILES) {
+    const r = await fetch(`${NATIVE_BASE}/${layer}/${z}/${x}/${y}`);
+    if (!r.ok) throw new Error(`tile ${layer}/${z}/${x}/${y}: ${await r.text()}`);
+    return new Uint8Array(await r.arrayBuffer());
+  }
   const key = tileKey(layer, z, x, y);
   const saved = await backend.cacheGet(key);
   if (saved) return saved;

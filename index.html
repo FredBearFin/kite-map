@@ -69,7 +69,23 @@
               <div class="hint">This takes a few minutes. Keep the app open.</div>
             </div>
           </div>
-          <p class="hint">Download an area once, then use it with no internet. Click <b>Draw area</b>, then drag a box on the map.</p>
+          <div id="world" class="box">
+            <h3 style="margin-top:0">World map (offline)</h3>
+            <p id="world-status" class="hint"></p>
+            <label>Detail <select id="world-zoom">
+              <option value="8">Overview: countries, highways, big lakes (zoom 8)</option>
+              <option value="10" selected>Standard: towns, roads, most water (zoom 10)</option>
+              <option value="12">Detailed: small roads and ponds (zoom 12)</option>
+            </select></label>
+            <div class="row"><button id="world-size">Check size</button><button id="world-go" class="primary" hidden>Download</button></div>
+            <div id="world-progress" hidden>
+              <div id="world-step" class="hint"></div>
+              <progress id="world-bar" max="1" value="0"></progress>
+              <button id="world-stop">Pause</button>
+              <div class="hint">You can pause or close the app; the download picks up where it left off.</div>
+            </div>
+          </div>
+          <p class="hint">For full street detail, satellite, terrain and wind in an area, download it here. Click <b>Draw area</b>, then drag a box on the map.</p>
           <button id="draw" class="primary">Draw area</button>
           <div id="dl-panel" hidden>
             <h3>New region</h3>
@@ -107,7 +123,7 @@
           <p id="folder" class="hint"></p>
         </section>
       </aside>
-      <main id="map"></main>
+      <main id="map"><div id="banner" class="banner" hidden></div></main>
       <div id="ctx" class="ctx" hidden></div>
       <div id="toast" class="toast" hidden></div>
     </div>
