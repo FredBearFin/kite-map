@@ -4,6 +4,7 @@ import { backend } from './backend.js';
 import { bufferBbox, countTiles, tilesIn } from './geo.js';
 import { cellsFor, downloadWind, filterBbox, lakeCenter, loadCell, scoreFeatures, windCellKey } from './lakes.js';
 import { ASSETS, fetchAsset, fetchTile } from './tiles.js';
+import { attachWaterColors, measureLake } from './watercolor.js';
 
 export const DEFAULTS = {
   baseZoom: 11, // whole box
@@ -13,6 +14,8 @@ export const DEFAULTS = {
   geoZoom: 8,
   minAreaKm2: 0.3,
   detailSpots: 300,
+  satSpots: 100, // satellite imagery for the best spots
+  satZoom: 14,
 };
 
 const FONTS = ['Noto Sans Regular', 'Noto Sans Medium', 'Noto Sans Italic'];
@@ -26,8 +29,9 @@ export function estimate(bbox, opt = DEFAULTS) {
   if (opt.geology) for (let z = 0; z <= opt.geoZoom; z++) geo += countTiles(bbox, z);
   // Detail tiles: about 60 per spot across z12-z14 for a typical lake.
   const detail = opt.detailSpots * 35;
-  const mb = (base * 25 + detail * 30 + dem * 60 + geo * 20) / 1024;
-  return { tiles: base + dem + geo + detail, mb: Math.round(mb) };
+  const sat = opt.satellite === false ? 0 : opt.satSpots * 45 + opt.detailSpots * 3;
+  const mb = (base * 25 + detail * 30 + dem * 60 + geo * 20 + sat * 35) / 1024;
+  return { tiles: base + dem + geo + detail + sat, mb: Math.round(mb) };
 }
 
 async function runPool(items, worker, concurrency, signal, onTick) {
@@ -105,10 +109,29 @@ export async function downloadRegion(region, progress, signal) {
     report.windError = String(e);
   }
 
-  // 3. Score and pick the spots that get full-detail map tiles
+  // 3. Score, then check water colour from satellite for the best candidates
+  //    (green or murky water lowers the score), and score again.
   progress('Scoring spots', 0, 1);
+  await attachWaterColors(lakes);
   await scoreFeatures(lakes);
-  const ranked = [...lakes].sort((a, b) => b.properties.score - a.properties.score);
+  let ranked = [...lakes].sort((a, b) => b.properties.score - a.properties.score);
+  const toMeasure = ranked.slice(0, opt.detailSpots).filter((f) => !f.properties.wc);
+  progress('Water colour', 0, toMeasure.length);
+  report.failed += await runPool(
+    toMeasure,
+    async (f) => {
+      const w = await measureLake(f);
+      if (w) {
+        f.properties.wc = w.color;
+        f.properties.wrgb = w.rgb;
+      }
+    },
+    4,
+    signal,
+    (d) => progress('Water colour', d, toMeasure.length),
+  );
+  await scoreFeatures(lakes);
+  ranked = [...lakes].sort((a, b) => b.properties.score - a.properties.score);
   const spots = ranked.slice(0, opt.detailSpots);
   progress('Scoring spots', 1, 1);
 
@@ -123,11 +146,17 @@ export async function downloadRegion(region, progress, signal) {
   osm = await missingTiles('osm', dedupe(osm));
   dem = await missingTiles('dem', dedupe(dem));
   let geo = opt.geology ? await missingTiles('geo', tileList(bbox, 0, opt.geoZoom)) : [];
+  let sat = [];
+  if (opt.satellite !== false) {
+    for (const f of spots.slice(0, opt.satSpots)) sat.push(...tileList(bufferBbox(f.properties._bbox, 1), 11, opt.satZoom));
+    sat = await missingTiles('sat', dedupe(sat));
+  }
 
   const jobs = [
     ['Map', osm, (t) => fetchTile('osm', ...t), 12],
     ['Terrain', dem, (t) => fetchTile('dem', ...t), 8],
     ['Geology', geo, (t) => fetchTile('geo', ...t), 4],
+    ['Satellite', sat, (t) => fetchTile('sat', ...t), 6],
   ];
   for (const [label, list, fn, conc] of jobs) {
     if (!list.length) continue;

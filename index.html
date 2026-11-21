@@ -12,25 +12,38 @@
           <h1>Kite Map</h1>
           <span id="net" class="pill">online</span>
         </header>
+        <div id="origin-bar">
+          <label>Starting from <select id="origin"></select></label>
+          <div class="row"><button id="origin-here" title="Use this computer's location">Use my location</button><button id="origin-del" title="Remove this starting point">Remove</button></div>
+        </div>
         <nav id="tabs">
           <button data-tab="spots" class="active">Spots</button>
+          <button data-tab="forecast">Forecast</button>
           <button data-tab="regions">Regions</button>
           <button data-tab="saved">Saved</button>
           <button data-tab="layers">Layers</button>
         </nav>
         <section id="tab-spots" class="tab active">
           <div class="filters">
+            <label>Mode <select id="f-mode">
+              <option value="water">Water, any level</option>
+              <option value="beginner">Beginner: lighter wind, 12 to 22 kn</option>
+              <option value="snow">Snowkite: frozen lakes in winter</option>
+            </select></label>
             <label>Min size <select id="f-area">
               <option value="0.3">0.3 km² (75 acres)</option>
               <option value="1" selected>1 km² (250 acres)</option>
               <option value="3">3 km² (740 acres)</option>
               <option value="10">10 km²</option>
             </select></label>
-            <label>Max distance from home <select id="f-dist">
-              <option value="100">100 km (60 mi)</option>
-              <option value="250">250 km (155 mi)</option>
-              <option value="500" selected>500 km (310 mi)</option>
-              <option value="100000">Any</option>
+            <label>Max drive (estimated) <select id="f-drive">
+              <option value="1">1 hour</option>
+              <option value="2">2 hours</option>
+              <option value="3">3 hours</option>
+              <option value="5" selected>5 hours</option>
+              <option value="8">8 hours</option>
+              <option value="16">16 hours</option>
+              <option value="1000">Any</option>
             </select></label>
             <label>Name <input id="f-name" type="search" placeholder="Search lakes" /></label>
             <label class="check"><input id="f-view" type="checkbox" /> Only in current view</label>
@@ -38,12 +51,20 @@
           <p id="spots-hint" class="hint"></p>
           <ol id="spot-list"></ol>
         </section>
+        <section id="tab-forecast" class="tab">
+          <p class="hint">Next 7 days for your saved spots. <b>Go</b>: 3 or more daylight hours of 12 to 35 kn from a direction that works on that lake. <b>Maybe</b>: some kiteable wind, but short or from a poor direction.</p>
+          <label class="check"><input id="fc-known" type="checkbox" checked /> Include reference spots</label>
+          <div class="row"><button id="fc-refresh" class="primary">Check forecast</button></div>
+          <p id="fc-status" class="hint"></p>
+          <div id="fc-table"></div>
+        </section>
         <section id="tab-regions" class="tab">
           <p class="hint">Download an area once, then use it with no internet. Click <b>Draw area</b>, then drag a box on the map.</p>
           <button id="draw" class="primary">Draw area</button>
           <div id="dl-panel" hidden>
             <h3>New region</h3>
             <label>Name <input id="dl-name" value="My region" /></label>
+            <label class="check"><input id="dl-sat" type="checkbox" checked /> Satellite imagery around the top 100 spots</label>
             <label class="check"><input id="dl-geo" type="checkbox" /> Include geology map</label>
             <p id="dl-est" class="hint"></p>
             <div class="row"><button id="dl-start" class="primary">Download</button><button id="dl-cancel">Cancel</button></div>
@@ -59,18 +80,20 @@
           <button id="clear-all" class="danger">Delete all downloaded data</button>
         </section>
         <section id="tab-saved" class="tab">
-          <p class="hint">Right-click the map to save a spot or set your home location.</p>
+          <p class="hint">Right-click the map to save a spot or to start trips from there. Saved spots appear in the Forecast tab.</p>
           <ul id="saved-list"></ul>
         </section>
         <section id="tab-layers" class="tab">
           <label class="check"><input id="l-lakes" type="checkbox" checked /> Lake kite scores</label>
+          <label class="check"><input id="l-known" type="checkbox" checked /> Reference kite spots and schools</label>
+          <label class="check"><input id="l-sat" type="checkbox" /> Satellite imagery (check beaches and weed beds)</label>
           <label class="check"><input id="l-hill" type="checkbox" checked /> Terrain shading</label>
           <label class="check"><input id="l-geo" type="checkbox" /> Geology (Macrostrat)</label>
           <h3>How spots are scored</h3>
-          <p class="hint">Each lake gets 0 to 100. For each of 16 wind directions it checks the longest clear run of water along the wind (1.5 km or more is ideal) and the width across it (800 m or more). Those are weighted by how many daylight hours per year the wind blows 12 to 35 knots from that direction, using last year's hourly ERA5 weather data.</p>
+          <p class="hint">Each lake gets 0 to 100. For each of 16 wind directions it checks the longest clear run of water along the wind (1.5 km or more is ideal) and the width across it (800 m or more). Those are weighted by how many daylight hours per year the wind blows 12 to 35 knots from that direction, using last year's hourly ERA5 weather data. Lakes whose water looks green or murky on summer satellite imagery, or that are very shallow on average (likely weedy or mucky), score lower.</p>
           <div class="legend"><span style="--c:#9fb3c8"></span>0<span style="--c:#f2c14e"></span>40<span style="--c:#f78154"></span>70<span style="--c:#d7263d"></span>90+</div>
           <h3>Data</h3>
-          <p class="hint">Map © OpenStreetMap contributors, Protomaps. Lakes: HydroLAKES (Messager et al. 2016), CC BY 4.0. Wind: Open-Meteo, ERA5 (Copernicus), CC BY 4.0. Terrain: Mapzen / AWS Terrain Tiles. Geology: Macrostrat, CC BY 4.0.</p>
+          <p class="hint">Map © OpenStreetMap contributors, Protomaps. Lakes: HydroLAKES (Messager et al. 2016), CC BY 4.0. Wind: Open-Meteo, ERA5 (Copernicus), CC BY 4.0. Terrain: Mapzen / AWS Terrain Tiles. Geology: Macrostrat, CC BY 4.0. Satellite: Sentinel-2 cloudless 2024 by EOX IT Services GmbH (contains modified Copernicus Sentinel data 2024), free for non-commercial use. Road times: OSRM.</p>
           <p id="folder" class="hint"></p>
         </section>
       </aside>

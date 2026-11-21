@@ -41,3 +41,44 @@ test('tile and distance math', () => {
   assert.equal(countTiles([-180, -85, 180, 85], 2), 16);
   assert.ok(Math.abs(haversineKm(41.2565, -95.9345, 39.0997, -94.5786) - 266) < 5);
 });
+
+import { iceMonths, dayVerdict, shallowFactor, estimateDriveHours } from '../src/scoring.js';
+
+test('monthly stats and ice months', () => {
+  const n = 24 * 365;
+  const sp = [], dir = [], hrs = [], mon = [], tmp = [];
+  for (let i = 0; i < n; i++) {
+    const m = Math.floor((i / n) * 12);
+    sp.push(15); dir.push(180); hrs.push(i % 24); mon.push(m);
+    tmp.push(m <= 1 || m === 11 ? -10 : 15);
+  }
+  const w = windStats(sp, dir, hrs, 1, mon, tmp);
+  assert.equal(w.byMonth.length, 12);
+  assert.ok(w.byMonth[5] > 300);
+  assert.deepEqual(iceMonths(w), [0, 1]); // Dec is the first cold month, so it doesn't count yet
+  const snow = scoreLake(fetchByAxis(rect), w, 'snow', { a: 4 });
+  assert.equal(snow.basis, 'ice');
+  assert.ok(snow.score > 50);
+});
+
+test('green or very shallow water scores lower; deep clear water is not penalised', () => {
+  const w = { kiteHours: 500, byDir: Array(16).fill(30), easyByDir: Array(16).fill(25) };
+  const f = fetchByAxis(rect);
+  const clearDeep = scoreLake(f, w, 'water', { d: 12, wc: 'clear' }).score;
+  assert.ok(clearDeep > scoreLake(f, w, 'water', { d: 0.8, wc: 'clear' }).score);
+  assert.ok(clearDeep > scoreLake(f, w, 'water', { d: 12, wc: 'green' }).score);
+  assert.equal(shallowFactor(12), 1);
+  assert.ok(scoreLake(f, w, 'beginner', { d: 12 }).effHours < scoreLake(f, w, 'water', { d: 12 }).effHours);
+});
+
+test('day verdicts and drive estimate', () => {
+  const suit = Array(16).fill(0); suit[12] = 1;
+  const west = Array(4).fill({ kn: 16, dir: 270 });
+  const north = Array(4).fill({ kn: 16, dir: 0 });
+  assert.equal(dayVerdict(west, suit).verdict, 'go');
+  assert.equal(dayVerdict(north, suit).verdict, 'maybe');
+  assert.equal(dayVerdict([{ kn: 5, dir: 270 }], suit).verdict, 'no');
+  assert.equal(dayVerdict(north, null).verdict, 'go');
+  const h = estimateDriveHours(266); // Omaha to Kansas City, about 3 h by road
+  assert.ok(h > 2.8 && h < 3.6, String(h));
+});

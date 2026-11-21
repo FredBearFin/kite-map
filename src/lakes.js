@@ -2,7 +2,7 @@
 
 import { backend } from './backend.js';
 import { bboxOf, bboxIntersects, haversineKm } from './geo.js';
-import { lakeShape, scoreLake, windStats } from './scoring.js';
+import { lakeShape, scoreLake, windStats, WIND_VERSION } from './scoring.js';
 
 export const LAKES_BASE = 'https://github.com/FredBearFin/kite-map/releases/download/lakes-v1/';
 
@@ -79,7 +79,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  */
 export async function downloadWind(points, onProgress, signal) {
   const todo = [];
-  for (const k of points) if (!(await backend.kvGet('wind/' + k))) todo.push(k);
+  for (const k of points) {
+    const w = await backend.kvGet('wind/' + k);
+    if (!w || (w.v ?? 1) < WIND_VERSION) todo.push(k);
+  }
   const year = new Date().getUTCFullYear() - 1;
   const batch = 8;
   for (let i = 0; i < todo.length; i += batch) {
@@ -90,7 +93,7 @@ export async function downloadWind(points, onProgress, signal) {
     const url =
       `https://archive-api.open-meteo.com/v1/archive?latitude=${lats}&longitude=${lons}` +
       `&start_date=${year}-01-01&end_date=${year}-12-31` +
-      `&hourly=wind_speed_10m,wind_direction_10m&wind_speed_unit=kn&timezone=auto&timeformat=unixtime`;
+      `&hourly=wind_speed_10m,wind_direction_10m,temperature_2m&wind_speed_unit=kn&timezone=auto&timeformat=unixtime`;
     let res;
     for (let attempt = 0; ; attempt++) {
       try {
@@ -107,8 +110,10 @@ export async function downloadWind(points, onProgress, signal) {
       const r = list[j];
       if (!r?.hourly) continue;
       const off = r.utc_offset_seconds || 0;
-      const hours = r.hourly.time.map((t) => new Date((t + off) * 1000).getUTCHours());
-      const stats = windStats(r.hourly.wind_speed_10m, r.hourly.wind_direction_10m, hours);
+      const local = r.hourly.time.map((t) => new Date((t + off) * 1000));
+      const hours = local.map((d) => d.getUTCHours());
+      const months = local.map((d) => d.getUTCMonth());
+      const stats = windStats(r.hourly.wind_speed_10m, r.hourly.wind_direction_10m, hours, 1, months, r.hourly.temperature_2m);
       stats.year = year;
       windMem.set(part[j], stats);
       await backend.kvSet('wind/' + part[j], stats);
@@ -119,12 +124,37 @@ export async function downloadWind(points, onProgress, signal) {
   }
 }
 
-/** Live forecast (next 7 days) of kiteable daylight hours. Online only. */
+/** Live forecast (next 7 days), hourly wind. Online only. */
 export async function forecast(lat, lon) {
-  const url =
-    `https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(3)}&longitude=${lon.toFixed(3)}` +
-    `&hourly=wind_speed_10m,wind_gusts_10m,wind_direction_10m&wind_speed_unit=kn&timezone=auto&forecast_days=7`;
-  return backend.httpJson(url);
+  return (await forecastMany([[lat, lon]]))[0];
+}
+
+/** Forecasts for several points in one request. Returns one result per point. */
+export async function forecastMany(points) {
+  const out = [];
+  for (let i = 0; i < points.length; i += 50) {
+    const part = points.slice(i, i + 50);
+    const url =
+      `https://api.open-meteo.com/v1/forecast?latitude=${part.map((p) => p[0].toFixed(3)).join(',')}` +
+      `&longitude=${part.map((p) => p[1].toFixed(3)).join(',')}` +
+      `&hourly=wind_speed_10m,wind_gusts_10m,wind_direction_10m,temperature_2m&wind_speed_unit=kn&timezone=auto&forecast_days=7`;
+    const r = await backend.httpJson(url, { refresh: true });
+    out.push(...(Array.isArray(r) ? r : [r]));
+  }
+  return out;
+}
+
+/** Real driving time and distance via the public OSRM router. Online only. */
+export async function driveRoute(from, to) {
+  const key = `drive/${from.lat.toFixed(3)},${from.lon.toFixed(3)}/${to[1].toFixed(3)},${to[0].toFixed(3)}`;
+  const saved = await backend.kvGet(key);
+  if (saved) return saved;
+  const url = `https://router.project-osrm.org/route/v1/driving/${from.lon.toFixed(5)},${from.lat.toFixed(5)};${to[0].toFixed(5)},${to[1].toFixed(5)}?overview=false`;
+  const r = await backend.httpJson(url);
+  if (r.code !== 'Ok' || !r.routes?.length) throw new Error('no route');
+  const res = { hours: r.routes[0].duration / 3600, km: r.routes[0].distance / 1000 };
+  await backend.kvSet(key, res);
+  return res;
 }
 
 // ---------- Scoring all loaded lakes ----------
@@ -138,12 +168,12 @@ export function lakeCenter(f) {
   return p._c;
 }
 
-export async function scoreFeatures(features) {
+export async function scoreFeatures(features, mode = 'water') {
   for (const f of features) {
     const [lon, lat] = lakeCenter(f);
     const fetch8 = lakeShape(f);
     const wind = await getWind(lat, lon);
-    const s = scoreLake(fetch8, wind);
+    const s = scoreLake(fetch8, wind, mode, f.properties);
     Object.assign(f.properties, { score: s.score, eff: s.effHours, basis: s.basis });
     f.properties._suit = s.suit;
   }
@@ -154,6 +184,25 @@ export function filterBbox(features, bbox) {
     lakeCenter(f);
     return bboxIntersects(f.properties._bbox, bbox);
   });
+}
+
+/** Is [lon, lat] inside the lake polygon (outer ring, ignoring islands)? */
+export function pointInLake(f, lon, lat) {
+  lakeCenter(f);
+  const b = f.properties._bbox;
+  if (lon < b[0] || lon > b[2] || lat < b[1] || lat > b[3]) return false;
+  const polys = f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates;
+  for (const poly of polys) {
+    const r = poly[0];
+    let inside = false;
+    for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+      const [xi, yi] = r[i];
+      const [xj, yj] = r[j];
+      if (yi > lat !== yj > lat && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
+    }
+    if (inside) return true;
+  }
+  return false;
 }
 
 export function distanceFromHome(f, home) {
