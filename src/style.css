@@ -17,15 +17,15 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); }
 #app { display: flex; height: 100vh; }
-#side { width: 340px; min-width: 300px; background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; overflow: hidden; }
+#side { width: 380px; min-width: 340px; background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; overflow: hidden; }
 #map { flex: 1; position: relative; }
 header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px 6px; }
 h1 { font-size: 18px; margin: 0; }
 h3 { font-size: 14px; margin: 16px 0 6px; }
 .pill { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: #dff3e4; color: #1e6b34; }
 .pill.off { background: #fde7e4; color: var(--danger); }
-#tabs { display: flex; gap: 2px; padding: 0 12px; border-bottom: 1px solid var(--line); }
-#tabs button { flex: 1; border: 0; background: none; padding: 8px 4px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; font: inherit; }
+#tabs { display: flex; gap: 0; padding: 0 8px; border-bottom: 1px solid var(--line); }
+#tabs button { flex: 1; border: 0; background: none; padding: 8px 2px; font-size: 13px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; font: inherit; }
 #tabs button.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
 .tab { display: none; padding: 12px 16px; overflow-y: auto; flex: 1; }
 .tab.active { display: block; }
@@ -53,7 +53,7 @@ progress { width: 100%; }
 .ctx button { display: block; width: 100%; text-align: left; border: 0; border-radius: 0; padding: 7px 14px; }
 .ctx button:hover { background: var(--bg); }
 .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #1d2733; color: #fff; padding: 8px 14px; border-radius: 6px; z-index: 20; max-width: 70vw; }
-.maplibregl-popup-content { padding: 12px 14px; max-width: 340px; font-size: 13px; max-height: 70vh; overflow-y: auto; }
+.maplibregl-popup-content { padding: 12px 14px; max-width: 340px; font-size: 13px; max-height: 60vh; overflow-y: auto; }
 .pop h4 { margin: 0 0 4px; font-size: 15px; }
 .pop table { border-collapse: collapse; width: 100%; margin: 6px 0; }
 .pop td { padding: 2px 0; }
@@ -63,3 +63,17 @@ progress { width: 100%; }
 .pop .fc { font-size: 12px; margin-top: 6px; }
 .pop .fc div { display: flex; justify-content: space-between; border-bottom: 1px dotted var(--line); padding: 2px 0; }
 .boxdraw { cursor: crosshair !important; }
+
+#origin-bar { padding: 0 16px 8px; }
+#origin-bar .row button { font-size: 12px; padding: 3px 8px; }
+.fc-grid { border-collapse: collapse; width: 100%; font-size: 12px; }
+.fc-grid { table-layout: auto; }
+.fc-grid th { font-weight: 600; font-size: 11px; color: var(--muted); padding: 3px 2px; text-align: center; }
+.fc-grid td { padding: 3px 1px; white-space: nowrap; text-align: center; border-bottom: 1px solid var(--line); }
+.fc-grid td.spot { text-align: left; max-width: 105px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.v-go { background: #2a9d55; color: #fff; border-radius: 4px; }
+.v-maybe { background: #f2c14e; border-radius: 4px; }
+.v-no { color: #b8c3cf; }
+.badge { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 8px; background: #eef2f6; color: var(--muted); margin-right: 4px; }
+.badge.warn { background: #fde7e4; color: var(--danger); }
+.badge.good { background: #dff3e4; color: #1e6b34; }
