@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
     paths: ["data-pipeline/**", ".github/workflows/lakes-data.yml"]
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       min_area_km2:
@@ -15,18 +17,26 @@ permissions:
 
 jobs:
   build:
+    if: github.event_name != 'release' || github.event.release.tag_name == 'hydrolakes-source'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - run: pip install -r data-pipeline/requirements.txt
       - name: Download HydroLAKES
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p work && cd work
-          curl -fL --retry 3 -o hl.zip https://data.hydrosheds.org/file/hydrolakes/HydroLAKES_polys_v10_shp.zip
+          # data.hydrosheds.org refuses downloads from GitHub's servers, so the
+          # original zip is uploaded by hand to the "hydrolakes-source" release
+          # (download it from https://www.hydrosheds.org/products/hydrolakes).
+          gh release download hydrolakes-source --pattern 'HydroLAKES_polys_v10_shp.zip' --output hl.zip
           unzip -q hl.zip
           find . -name "*.shp"
       - name: Build cells
