@@ -5,7 +5,7 @@ import { backend } from './backend.js';
 import { DIRS16, bboxIntersects } from './geo.js';
 import { bestDirs, dayVerdict, estimateDriveHours, iceMonths } from './scoring.js';
 import { registerProtocol, glyphsTemplate, assetUrl, ASSETS, status } from './tiles.js';
-import { cellsFor, distanceFromHome, driveRoute, filterBbox, forecast, forecastMany, getWind, lakeCenter, loadCell, pointInLake, scoreFeatures } from './lakes.js';
+import { HYDROLAKES_PAGE, HYDROLAKES_URL, lakeIndex, cellsFor, distanceFromHome, driveRoute, filterBbox, forecast, forecastMany, getWind, lakeCenter, loadCell, pointInLake, scoreFeatures } from './lakes.js';
 import { KNOWN_SPOTS } from './known-spots.js';
 import { attachWaterColors } from './watercolor.js';
 import { downloadRegion, estimate, DEFAULTS } from './download.js';
@@ -156,9 +156,13 @@ async function init() {
   state.fcData = await backend.kvGet('forecast/last');
   renderForecast();
   $('folder').textContent = 'Data folder: ' + (await backend.dataFolder());
-  if (!state.regions.length) {
+  await renderLakeDb();
+  if (!(await lakeIndex())) {
     switchTab('regions');
-    toast('Welcome! Download an area first: click "Draw area" and drag a box around the lakes you want to explore.', 9000);
+    toast('Welcome! First set up the lake database: click "Import lake zip" and choose HydroLAKES_polys_v10_shp.zip.', 10000);
+  } else if (!state.regions.length) {
+    switchTab('regions');
+    toast('Now download an area: click "Draw area" and drag a box around the lakes you want to explore.', 9000);
   }
 }
 
@@ -167,7 +171,7 @@ async function loadRegions() {
   const seen = new Map();
   for (const r of state.regions) {
     for (const cell of cellsFor(r.bbox)) {
-      const feats = await loadCell(cell, { offlineOnly: true });
+      const feats = await loadCell(cell);
       for (const f of filterBbox(feats, r.bbox)) {
         if (f.properties.a < (r.options?.minAreaKm2 ?? DEFAULTS.minAreaKm2)) continue;
         if (!seen.has(f.properties.id)) seen.set(f.properties.id, f);
@@ -749,6 +753,61 @@ $('dl-start').onclick = async () => {
     state.drawBox = null;
   }
 };
+// ---------- Lake database ----------
+
+async function renderLakeDb() {
+  const idx = await lakeIndex({ reload: true });
+  const total = idx ? Object.values(idx.cells).reduce((a, b) => a + b, 0) : 0;
+  $('lakedb-status').innerHTML = idx
+    ? `Lake database ready: ${total.toLocaleString()} lakes worldwide.`
+    : `<b>Needed once:</b> the HydroLAKES lake file (820 MB zip). If you already downloaded <code>HydroLAKES_polys_v10_shp.zip</code>, click <b>Import lake zip</b> and choose it. Otherwise click <b>Download it</b>, or get it from <a href="${HYDROLAKES_PAGE}" target="_blank">hydrosheds.org</a> ("Lake polygons ... shapefile format").`;
+  $('lakedb-import').textContent = idx ? 'Re-import lake zip' : 'Import lake zip';
+  $('lakedb-download').hidden = !!idx;
+  $('draw').disabled = !idx;
+}
+
+let lakeJobBusy = false;
+async function runLakeJob(fn) {
+  if (lakeJobBusy) return;
+  lakeJobBusy = true;
+  $('lakedb-progress').hidden = false;
+  $('lakedb-import').disabled = $('lakedb-download').disabled = true;
+  const labels = { download: 'Downloading', unzip: 'Unzipping', read: 'Reading lakes' };
+  const stop = await backend.onLakesProgress(({ stage, done, total }) => {
+    const mb = (v) => Math.round(v / 1048576).toLocaleString() + ' MB';
+    $('lakedb-step').textContent = stage === 'read'
+      ? `${labels[stage]}: ${done.toLocaleString()} of ${total.toLocaleString()}`
+      : `${labels[stage] || stage}: ${mb(done)}${total ? ' of ' + mb(total) : ''}`;
+    $('lakedb-bar').value = total ? done / total : 0;
+  });
+  try {
+    const r = await fn();
+    if (r) toast(`Lake database ready: ${r.lakes.toLocaleString()} lakes. Now click "Draw area" to download a region.`, 9000);
+    await renderLakeDb();
+    await loadRegions();
+  } catch (e) {
+    const msg = String(e);
+    toast(
+      /http 40[13]/.test(msg)
+        ? 'The lake website refused the download. Download the zip in your browser from hydrosheds.org, then click "Import lake zip".'
+        : 'Lake setup failed: ' + msg,
+      12000,
+    );
+  } finally {
+    stop();
+    lakeJobBusy = false;
+    $('lakedb-progress').hidden = true;
+    $('lakedb-import').disabled = $('lakedb-download').disabled = false;
+  }
+}
+
+$('lakedb-import').onclick = async () => {
+  const path = await backend.pickLakeFile();
+  if (!path) return;
+  runLakeJob(() => backend.lakesImport(path));
+};
+$('lakedb-download').onclick = () => runLakeJob(() => backend.lakesDownload(HYDROLAKES_URL));
+
 $('dl-abort').onclick = () => state.downloading?.abort();
 
 async function renderRegions() {
@@ -781,8 +840,9 @@ async function renderRegions() {
 }
 
 $('clear-all').onclick = async () => {
-  if (!confirm('Delete all downloaded maps, lakes and wind data? Saved spots are kept.')) return;
-  await backend.cacheDeletePrefix('');
+  if (!confirm('Delete all downloaded maps and wind data? Saved spots and the lake database are kept.')) return;
+  // Keep the lake database (lakes/), which takes a while to rebuild.
+  for (const prefix of ['t/', 'a/', 'pm/']) await backend.cacheDeletePrefix(prefix);
   for (const [k] of await backend.kvList('region/')) await backend.kvDelete(k);
   for (const [k] of await backend.kvList('wind/')) await backend.kvDelete(k);
   await loadRegions();

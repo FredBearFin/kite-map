@@ -59,6 +59,16 @@
           <div id="fc-table"></div>
         </section>
         <section id="tab-regions" class="tab">
+          <div id="lakedb" class="box">
+            <h3 style="margin-top:0">Lake database</h3>
+            <p id="lakedb-status" class="hint"></p>
+            <div class="row"><button id="lakedb-import" class="primary">Import lake zip</button><button id="lakedb-download">Download it (820 MB)</button></div>
+            <div id="lakedb-progress" hidden>
+              <div id="lakedb-step" class="hint"></div>
+              <progress id="lakedb-bar" max="1" value="0"></progress>
+              <div class="hint">This takes a few minutes. Keep the app open.</div>
+            </div>
+          </div>
           <p class="hint">Download an area once, then use it with no internet. Click <b>Draw area</b>, then drag a box on the map.</p>
           <button id="draw" class="primary">Draw area</button>
           <div id="dl-panel" hidden>

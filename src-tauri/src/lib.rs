@@ -5,6 +5,8 @@
 //! asks for data through these commands; when the network is down, anything
 //! already saved keeps working.
 
+mod lakes_import;
+
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -214,6 +216,82 @@ fn kv_list(state: State<'_, AppState>, prefix: String) -> Result<Vec<(String, St
     rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
 }
 
+#[derive(Serialize)]
+struct ImportResult {
+    lakes: u64,
+    cells: usize,
+}
+
+fn store_lakes(app: &tauri::AppHandle, input: &std::path::Path, min_area: f64) -> Result<ImportResult, String> {
+    let work = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let (cells, index, stats) = lakes_import::build(app, input, &work, min_area)?;
+    let state = app.state::<AppState>();
+    let mut db = state.db.lock().map_err(|e| e.to_string())?;
+    let tx = db.transaction().map_err(|e| e.to_string())?;
+    tx.execute(
+        "DELETE FROM blobs WHERE key >= ?1 AND key < ?2",
+        params!["lakes/", prefix_end("lakes/")],
+    )
+    .map_err(|e| e.to_string())?;
+    for (name, data) in &cells {
+        tx.execute(
+            "INSERT OR REPLACE INTO blobs (key, data, ts) VALUES (?1, ?2, ?3)",
+            params![format!("lakes/{name}"), data, now()],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    tx.execute(
+        "INSERT OR REPLACE INTO blobs (key, data, ts) VALUES ('lakes/index.json', ?1, ?2)",
+        params![index.as_bytes(), now()],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(ImportResult { lakes: stats.lakes, cells: stats.cells })
+}
+
+/// Build the lake database from a HydroLAKES zip or .shp on this computer.
+#[tauri::command]
+async fn lakes_import(app: tauri::AppHandle, path: String, min_area: Option<f64>) -> Result<ImportResult, String> {
+    let min_area = min_area.unwrap_or(0.25);
+    tauri::async_runtime::spawn_blocking(move || store_lakes(&app, std::path::Path::new(&path), min_area))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Download the HydroLAKES zip into the app folder, then import it.
+#[tauri::command]
+async fn lakes_download(app: tauri::AppHandle, state: State<'_, AppState>, url: String) -> Result<ImportResult, String> {
+    use tauri::Emitter;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dest = dir.join("HydroLAKES_polys_v10_shp.zip");
+    let part = dir.join("HydroLAKES_polys_v10_shp.zip.part");
+    if !dest.exists() {
+        let mut resp = state.http.get(&url).timeout(std::time::Duration::from_secs(4 * 3600)).send().await.map_err(|e| format!("network: {e}"))?;
+        if !resp.status().is_success() {
+            return Err(format!("http {}", resp.status().as_u16()));
+        }
+        let total = resp.content_length().unwrap_or(0);
+        let mut file = std::io::BufWriter::new(std::fs::File::create(&part).map_err(|e| e.to_string())?);
+        let mut done = 0u64;
+        let mut last = 0u64;
+        while let Some(chunk) = resp.chunk().await.map_err(|e| format!("network: {e}"))? {
+            std::io::Write::write_all(&mut file, &chunk).map_err(|e| format!("Could not save (disk full?): {e}"))?;
+            done += chunk.len() as u64;
+            if done - last > (8 << 20) {
+                last = done;
+                let _ = app.emit("lakes-progress", serde_json::json!({ "stage": "download", "done": done, "total": total }));
+            }
+        }
+        std::io::Write::flush(&mut file).map_err(|e| e.to_string())?;
+        drop(file);
+        std::fs::rename(&part, &dest).map_err(|e| e.to_string())?;
+    }
+    let result = tauri::async_runtime::spawn_blocking(move || store_lakes(&app, &dest, 0.25))
+        .await
+        .map_err(|e| e.to_string())?;
+    result
+}
+
 #[tauri::command]
 fn data_folder(app: tauri::AppHandle) -> Result<String, String> {
     app.path()
@@ -224,6 +302,7 @@ fn data_folder(app: tauri::AppHandle) -> Result<String, String> {
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
@@ -247,7 +326,9 @@ pub fn run() {
             kv_set,
             kv_delete,
             kv_list,
-            data_folder
+            data_folder,
+            lakes_import,
+            lakes_download
         ])
         .run(tauri::generate_context!())
         .expect("error while running Kite Map");
