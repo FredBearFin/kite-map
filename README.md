@@ -41,7 +41,7 @@ Not yet included: shore access, upwind trees or bluffs, local rules. Always chec
 | Geology (optional) | [Macrostrat](https://macrostrat.org) | CC BY 4.0 |
 | Satellite imagery, water colour | [Sentinel-2 cloudless 2024](https://s2maps.eu) by EOX IT Services GmbH (contains modified Copernicus Sentinel data) | free for non-commercial use |
 
-The lake pack is pre-built by the `Build lake data pack` GitHub Action (`data-pipeline/build_lakes.py`) and published on the `lakes-v1` release. The app downloads only the 10-degree cells it needs.
+The lake database is built on your own computer, once. In the Regions tab, click **Import lake zip** and choose `HydroLAKES_polys_v10_shp.zip` (from the [HydroLAKES page](https://www.hydrosheds.org/products/hydrolakes), "Lake polygons ... shapefile format", 820 MB), or click **Download it** to let the app fetch it. The app keeps lakes of 0.25 km² or more, simplifies them slightly, and stores them in 10-degree cells. You can delete the zip afterwards.
 
 ## Download
 

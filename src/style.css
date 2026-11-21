@@ -77,3 +77,5 @@ progress { width: 100%; }
 .badge { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 8px; background: #eef2f6; color: var(--muted); margin-right: 4px; }
 .badge.warn { background: #fde7e4; color: var(--danger); }
 .badge.good { background: #dff3e4; color: #1e6b34; }
+.box { border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; margin-bottom: 12px; background: var(--bg); }
+.box code { font-size: 11px; }

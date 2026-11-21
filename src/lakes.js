@@ -4,7 +4,10 @@ import { backend } from './backend.js';
 import { bboxOf, bboxIntersects, haversineKm } from './geo.js';
 import { lakeShape, scoreLake, windStats, WIND_VERSION } from './scoring.js';
 
-export const LAKES_BASE = 'https://github.com/FredBearFin/kite-map/releases/download/lakes-v1/';
+// The lake database is built on this computer from the HydroLAKES zip
+// (see the Regions tab), and stored under lakes/<cell> and lakes/index.json.
+export const HYDROLAKES_URL = 'https://data.hydrosheds.org/file/hydrolakes/HydroLAKES_polys_v10_shp.zip';
+export const HYDROLAKES_PAGE = 'https://www.hydrosheds.org/products/hydrolakes';
 
 export function cellName(lat0, lon0) {
   const ns = lat0 >= 0 ? 'n' : 's';
@@ -32,22 +35,18 @@ async function gunzipJson(bytes) {
 }
 
 let index = null;
-export async function lakeIndex() {
-  if (index) return index;
-  index = await backend.httpJson(LAKES_BASE + 'index.json', { key: 'lakes/index.json' });
+/** The lake index, or null if the lake database has not been set up yet. */
+export async function lakeIndex({ reload = false } = {}) {
+  if (index && !reload) return index;
+  const bytes = await backend.cacheGet('lakes/index.json');
+  index = bytes ? JSON.parse(new TextDecoder().decode(bytes)) : null;
   return index;
 }
 
-/** Load one cell (downloading it if needed). Returns GeoJSON features. */
-export async function loadCell(name, { offlineOnly = false } = {}) {
-  const key = 'lakes/' + name;
-  let bytes = await backend.cacheGet(key);
-  if (!bytes) {
-    if (offlineOnly) return [];
-    const idx = await lakeIndex();
-    if (!idx.cells[name]) return [];
-    bytes = await backend.httpGet(LAKES_BASE + name + '.geojson.gz', { key });
-  }
+/** Load one cell from the local lake database. Returns GeoJSON features. */
+export async function loadCell(name) {
+  const bytes = await backend.cacheGet('lakes/' + name);
+  if (!bytes) return [];
   const fc = await gunzipJson(bytes);
   return fc.features;
 }
