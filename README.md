@@ -8,7 +8,8 @@ You draw a box on the map and download it once. The app saves the map, terrain, 
 
 - **Starting points.** Drive times are measured from whichever starting point you pick: home, a hotel on a trip, or your current location. Right-click the map and choose "Start trips from here" to add one.
 - **Spots list** ranked best first, filtered by estimated drive time, size and name. Online, a spot's popup also shows the real road drive time (OSRM).
-- **Three modes:** Water (any level), Beginner (shallow lakes and 12 to 22 kn wind), and Snowkite (big lakes in months when they are likely frozen).
+- **Three modes:** Water (any level), Beginner (counts only lighter 12 to 22 kn wind), and Snowkite (big lakes in months when they are likely frozen).
+- **Water colour from satellite.** The Sentinel-2 cloudless mosaic is sampled inside each top lake: clear and dark, green (algae likely) or murky. Green and murky water lower the score. A satellite layer lets you check beaches and weed beds yourself.
 - **Forecast tab.** Go / maybe / no for the next 7 days at your saved spots and the reference spots, based on daylight hours of 12 to 35 kn from directions that work on each lake. The last forecast stays available offline.
 - **Seasons.** Each lake shows kiteable hours by month and the months it is likely frozen.
 - **Reference spots and schools** (Iowa Great Lakes, Branched Oak, McConaughy, Lakawa's Minnesota lakes, South Padre, Bird Island Basin) as a map layer.
@@ -22,7 +23,7 @@ For each lake and each of 16 wind directions, the app measures:
 
 Those are weighted by how many daylight hours per year the wind blows 12 to 35 knots from that direction, using ERA5 hourly data from last year. The result is "good kiting hours per year" and a 0 to 100 score.
 
-Beginner mode uses only 12 to 22 kn hours and multiplies by a depth factor from HydroLAKES average depth (2 m or less is best). Average depth is a hint: a deep lake can still have shallow bays.
+Water quality lowers the score: green water x0.8, murky water x0.7, and very shallow lakes (HydroLAKES average depth under 1.5 m, often weedy and mucky in farm country, and green by late summer) x0.75. Deep, clear lakes are not penalised. Beginner mode counts only the lighter 12 to 22 kn hours.
 
 Snowkite mode looks at months whose mean air temperature is -4 C or colder after a month below freezing, and ranks lakes by open space and kiteable hours in those months. Always check real ice thickness before going out.
 
@@ -38,6 +39,7 @@ Not yet included: shore access, upwind trees or bluffs, local rules. Always chec
 | Road drive times (online) | [OSRM](https://project-osrm.org) public router, OpenStreetMap | ODbL |
 | Terrain shading | Mapzen / AWS Terrain Tiles | various, open |
 | Geology (optional) | [Macrostrat](https://macrostrat.org) | CC BY 4.0 |
+| Satellite imagery, water colour | [Sentinel-2 cloudless 2024](https://s2maps.eu) by EOX IT Services GmbH (contains modified Copernicus Sentinel data) | free for non-commercial use |
 
 The lake pack is pre-built by the `Build lake data pack` GitHub Action (`data-pipeline/build_lakes.py`) and published on the `lakes-v1` release. The app downloads only the 10-degree cells it needs.
 

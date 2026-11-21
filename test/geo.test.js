@@ -42,7 +42,7 @@ test('tile and distance math', () => {
   assert.ok(Math.abs(haversineKm(41.2565, -95.9345, 39.0997, -94.5786) - 266) < 5);
 });
 
-import { iceMonths, dayVerdict, depthFactor, estimateDriveHours } from '../src/scoring.js';
+import { iceMonths, dayVerdict, shallowFactor, estimateDriveHours } from '../src/scoring.js';
 
 test('monthly stats and ice months', () => {
   const n = 24 * 365;
@@ -61,11 +61,14 @@ test('monthly stats and ice months', () => {
   assert.ok(snow.score > 50);
 });
 
-test('beginner mode prefers shallow lakes', () => {
+test('green or very shallow water scores lower; deep clear water is not penalised', () => {
   const w = { kiteHours: 500, byDir: Array(16).fill(30), easyByDir: Array(16).fill(25) };
   const f = fetchByAxis(rect);
-  assert.ok(scoreLake(f, w, 'beginner', { d: 1.5 }).score > scoreLake(f, w, 'beginner', { d: 12 }).score);
-  assert.equal(depthFactor(1), 1);
+  const clearDeep = scoreLake(f, w, 'water', { d: 12, wc: 'clear' }).score;
+  assert.ok(clearDeep > scoreLake(f, w, 'water', { d: 0.8, wc: 'clear' }).score);
+  assert.ok(clearDeep > scoreLake(f, w, 'water', { d: 12, wc: 'green' }).score);
+  assert.equal(shallowFactor(12), 1);
+  assert.ok(scoreLake(f, w, 'beginner', { d: 12 }).effHours < scoreLake(f, w, 'water', { d: 12 }).effHours);
 });
 
 test('day verdicts and drive estimate', () => {

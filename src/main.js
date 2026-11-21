@@ -3,10 +3,11 @@ import maplibregl from 'maplibre-gl';
 import { layers, namedFlavor } from '@protomaps/basemaps';
 import { backend } from './backend.js';
 import { DIRS16, bboxIntersects } from './geo.js';
-import { bestDirs, dayVerdict, depthFactor, estimateDriveHours, iceMonths } from './scoring.js';
+import { bestDirs, dayVerdict, estimateDriveHours, iceMonths } from './scoring.js';
 import { registerProtocol, glyphsTemplate, assetUrl, ASSETS, status } from './tiles.js';
 import { cellsFor, distanceFromHome, driveRoute, filterBbox, forecast, forecastMany, getWind, lakeCenter, loadCell, pointInLake, scoreFeatures } from './lakes.js';
 import { KNOWN_SPOTS } from './known-spots.js';
+import { attachWaterColors } from './watercolor.js';
 import { downloadRegion, estimate, DEFAULTS } from './download.js';
 
 const $ = (id) => document.getElementById(id);
@@ -41,6 +42,9 @@ function buildStyle() {
     },
   ];
   base.splice(waterIdx, 0, ...extra);
+  // Satellite imagery sits above the base map fills, below roads and labels.
+  const roadsIdx = base.findIndex((l) => l.id.startsWith('roads'));
+  base.splice(roadsIdx < 0 ? base.length : roadsIdx, 0, { id: 'satellite', type: 'raster', source: 'sat', layout: { visibility: 'none' } });
   return {
     version: 8,
     glyphs: glyphsTemplate(),
@@ -54,6 +58,13 @@ function buildStyle() {
       },
       dem: { type: 'raster-dem', tiles: ['kt://dem/{z}/{x}/{y}'], tileSize: 256, maxzoom: 12, encoding: 'terrarium' },
       geo: { type: 'raster', tiles: ['kt://geo/{z}/{x}/{y}'], tileSize: 256, maxzoom: 12, attribution: 'Macrostrat' },
+      sat: {
+        type: 'raster',
+        tiles: ['kt://sat/{z}/{x}/{y}'],
+        tileSize: 256,
+        maxzoom: 14,
+        attribution: '<a href="https://s2maps.eu">Sentinel-2 cloudless 2024</a> by EOX (modified Copernicus Sentinel data)',
+      },
     },
     layers: base,
   };
@@ -164,6 +175,7 @@ async function loadRegions() {
     }
   }
   state.lakes = [...seen.values()];
+  await attachWaterColors(state.lakes);
   await scoreFeatures(state.lakes, state.mode);
   state.byId = new Map(state.lakes.map((f) => [f.properties.id, f]));
   map.getSource('lakes')?.setData(fc(state.lakes));
@@ -208,7 +220,7 @@ function renderSpots() {
     const li = document.createElement('li');
     li.innerHTML = `<div class="score" style="background:${scoreColor(p.score)}">${p.score}</div>
       <div class="grow"><div class="name"></div>
-      <div class="sub">${p.a.toFixed(1)} km² · ~${fmtH(estimateDriveHours(d))} drive${p.eff != null ? ` · ${p.eff} good hrs/yr` : ''}${state.mode === 'beginner' && p.d > 4 ? ' · deep' : ''}</div></div>`;
+      <div class="sub">${p.a.toFixed(1)} km² · ~${fmtH(estimateDriveHours(d))} drive${p.eff != null ? ` · ${p.eff} good hrs/yr` : ''}${p.wc === 'green' ? ' · green water' : p.wc === 'murky' ? ' · murky' : ''}</div></div>`;
     li.querySelector('.name').textContent = lakeName(p);
     li.addEventListener('click', () => focusLake(f));
     ol.appendChild(li);
@@ -216,7 +228,7 @@ function renderSpots() {
   $('spots-hint').textContent = state.lakes.length
     ? `${list.length} of ${state.lakes.length} lakes shown, best first, from ${state.home.name}.` +
       (state.mode === 'snow' ? ' Snowkite mode ranks lakes by open space and wind in months when they are likely frozen.' : '') +
-      (state.mode === 'beginner' ? ' Beginner mode favors shallow lakes and 12 to 22 kn wind.' : '')
+      (state.mode === 'beginner' ? ' Beginner mode counts only lighter 12 to 22 kn wind.' : '')
     : 'No lakes yet. Download a region in the Regions tab.';
 }
 ['f-area', 'f-drive', 'f-name', 'f-view'].forEach((id) => $(id).addEventListener('input', renderSpots));
@@ -310,7 +322,8 @@ async function showLakePopup(f, lngLat) {
       <tr><td>Best wind from</td><td>${best.length ? best.slice(0, 5).join(', ') : 'none, the lake is small or narrow'}</td></tr>
       ${wind ? `<tr><td>Kiteable hours</td><td>${wind.kiteHours} daylight hrs/yr (${wind.year})</td></tr><tr><td>Mean wind</td><td>${wind.meanKn} kn</td></tr>` : ''}
       ${p.s ? `<tr><td>Shoreline</td><td>${fmtKm(p.s)}</td></tr>` : ''}
-      ${p.d ? `<tr><td>Average depth</td><td>${p.d} m (${(p.d * 3.28).toFixed(0)} ft)${p.d > 4 ? ', expect to swim after falls' : ''}</td></tr>` : ''}
+      ${p.d ? `<tr><td>Average depth</td><td>${p.d} m (${(p.d * 3.28).toFixed(0)} ft)</td></tr>` : ''}
+      ${p.wc ? `<tr><td>Water colour</td><td>${{ clear: 'Clear / dark', green: 'Green', murky: 'Brown / murky' }[p.wc]} (summer satellite mosaic)</td></tr>` : ''}
       ${p.e != null ? `<tr><td>Elevation</td><td>${p.e} m</td></tr>` : ''}
     </table>
     ${monthSvg(wind)}
@@ -341,11 +354,11 @@ function badges(p, wind) {
   const out = [];
   const known = KNOWN_SPOTS.find((k) => pointInLakeSafe(p, k));
   if (known) out.push(`<span class="badge good">Known kite spot</span>`);
-  if (p.d != null) {
-    const f = depthFactor(p.d);
-    if (f >= 0.85) out.push('<span class="badge good">Shallow on average</span>');
-    else if (f <= 0.45) out.push('<span class="badge warn">Deep</span>');
-  }
+  const sw = p.wrgb ? `<span style="display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:3px;background:rgb(${p.wrgb.join(',')})"></span>` : '';
+  if (p.wc === 'clear') out.push(`<span class="badge good">${sw}Clear water</span>`);
+  if (p.wc === 'green') out.push(`<span class="badge warn">${sw}Green water (algae likely)</span>`);
+  if (p.wc === 'murky') out.push(`<span class="badge warn">${sw}Murky water</span>`);
+  if (p.d != null && p.d < 1.5) out.push('<span class="badge warn">Very shallow: likely weedy or mucky</span>');
   if (iceMonths(wind).length) out.push('<span class="badge">Freezes in winter</span>');
   return out.join('');
 }
@@ -645,6 +658,7 @@ function renderSaved() {
 $('l-lakes').onchange = (e) => ['lake-fill', 'lake-line', 'lake-score'].forEach((id) => map.setLayoutProperty(id, 'visibility', e.target.checked ? 'visible' : 'none'));
 $('l-hill').onchange = (e) => map.setLayoutProperty('hillshade', 'visibility', e.target.checked ? 'visible' : 'none');
 $('l-known').onchange = (e) => ['known-pt', 'known-label'].forEach((id) => map.setLayoutProperty(id, 'visibility', e.target.checked ? 'visible' : 'none'));
+$('l-sat').onchange = (e) => map.setLayoutProperty('satellite', 'visibility', e.target.checked ? 'visible' : 'none');
 $('l-geo').onchange = (e) => map.setLayoutProperty('geology', 'visibility', e.target.checked ? 'visible' : 'none');
 
 // ---------- Region download ----------
@@ -679,7 +693,7 @@ map.on('mouseup', () => {
 });
 
 function regionOptions() {
-  return { ...DEFAULTS, geology: $('dl-geo').checked };
+  return { ...DEFAULTS, geology: $('dl-geo').checked, satellite: $('dl-sat').checked };
 }
 function updateEstimate() {
   const b = state.drawBox;
@@ -693,6 +707,7 @@ function updateEstimate() {
   if (est.mb > 20000) $('dl-est').textContent += ' This is too big; draw a smaller box.';
 }
 $('dl-geo').onchange = updateEstimate;
+$('dl-sat').onchange = updateEstimate;
 $('dl-cancel').onclick = () => {
   $('dl-panel').hidden = true;
   state.drawBox = null;

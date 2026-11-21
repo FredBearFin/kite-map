@@ -18,6 +18,12 @@ export const SOURCES = {
     url: 'https://tiles.macrostrat.org/carto/{z}/{x}/{y}.png',
     maxzoom: 12,
   },
+  // Sentinel-2 cloudless 2024 by EOX IT Services GmbH (contains modified
+  // Copernicus Sentinel data). Free for non-commercial use with attribution.
+  sat: {
+    url: 'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2024_3857/default/g/{z}/{y}/{x}.jpg',
+    maxzoom: 14,
+  },
 };
 
 export const ASSETS = {

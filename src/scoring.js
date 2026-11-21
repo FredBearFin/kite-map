@@ -80,13 +80,21 @@ export function lakeShape(feature) {
   return feature.properties._fetch;
 }
 
-/** 0..1 multiplier for beginners: shallow water is easier to learn in. */
-export function depthFactor(avgDepthM) {
-  if (avgDepthM == null) return 0.7;
-  if (avgDepthM <= 2) return 1;
-  if (avgDepthM <= 4) return 0.85;
-  if (avgDepthM <= 8) return 0.65;
-  return 0.45;
+/**
+ * Very shallow lakes (average depth under about 1.5 m) in farm country tend
+ * to be weedy, mucky and green by mid-summer, and are too shallow for fins in
+ * places. A mild penalty; deep lakes are not penalised.
+ */
+export function shallowFactor(avgDepthM) {
+  if (avgDepthM == null) return 1;
+  return avgDepthM < 1.5 ? 0.75 : 1;
+}
+
+/** Water colour from satellite imagery: clear water scores best. */
+export function waterFactor(color) {
+  if (color === 'green') return 0.8;
+  if (color === 'murky') return 0.7;
+  return 1;
 }
 
 const toScore = (eff, scale) => Math.round(100 * (1 - Math.exp(-eff / scale)));
@@ -108,15 +116,16 @@ export function scoreLake(fetch8, wind, mode = 'water', props = {}) {
     const eff = hours * space;
     return { score: toScore(eff, 150), effHours: Math.round(eff), suit, basis: ice.length ? 'ice' : 'no-ice' };
   }
+  const quality = shallowFactor(props.d) * waterFactor(props.wc);
   if (!wind || !wind.kiteHours) {
     const mean = suit.reduce((a, b) => a + b, 0) / 16;
-    const f = mode === 'beginner' ? depthFactor(props.d) : 1;
-    return { score: Math.round(mean * 60 * f), effHours: null, suit, basis: 'shape' };
+    return { score: Math.round(mean * 60 * quality), effHours: null, suit, basis: 'shape' };
   }
+  // Beginners: count only lighter, more forgiving wind (12 to 22 kn).
   const dirs = mode === 'beginner' && wind.easyByDir ? wind.easyByDir : wind.byDir;
   let eff = 0;
   for (let d = 0; d < 16; d++) eff += dirs[d] * suit[d];
-  if (mode === 'beginner') eff *= depthFactor(props.d);
+  eff *= quality;
   return { score: toScore(eff, mode === 'beginner' ? 200 : 300), effHours: Math.round(eff), suit, basis: 'wind' };
 }
 
