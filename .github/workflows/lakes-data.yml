@@ -1,0 +1,37 @@
+name: Build lake data pack
+
+on:
+  workflow_dispatch:
+    inputs:
+      min_area_km2:
+        description: Smallest lake to include (km²)
+        default: "0.25"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r data-pipeline/requirements.txt
+      - name: Download HydroLAKES
+        run: |
+          mkdir -p work && cd work
+          curl -fL --retry 3 -o hl.zip https://data.hydrosheds.org/file/hydrolakes/HydroLAKES_polys_v10_shp.zip
+          unzip -q hl.zip
+          find . -name "*.shp"
+      - name: Build cells
+        run: python data-pipeline/build_lakes.py "$(find work -name 'HydroLAKES_polys_v10.shp' | head -1)" out "${{ inputs.min_area_km2 }}"
+      - name: Publish release lakes-v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          du -sh out; ls out | wc -l
+          gh release view lakes-v1 >/dev/null 2>&1 || gh release create lakes-v1 --title "Lake data pack v1" --notes "Global lakes for Kite Map, from HydroLAKES v1.0 (Messager et al. 2016, CC BY 4.0). The app downloads these files automatically." --latest=false
+          gh release upload lakes-v1 out/* --clobber
