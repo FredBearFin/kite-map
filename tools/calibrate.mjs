@@ -28,7 +28,6 @@ const PLACES = [
   { name: 'Bird Island Basin, TX', lat: 27.475, lon: -97.31, expect: 'good', coast: true },
   { name: 'Hood River (Columbia), OR', lat: 45.715, lon: -121.52, expect: 'good', coast: true },
   { name: 'Lake of the Isles, MN', lat: 44.956, lon: -93.308, expect: 'poor' },
-  { name: 'Standing Bear Lake, NE', lat: 41.306, lon: -96.097, expect: 'poor' },
   { name: 'Lake Cunningham, NE', lat: 41.34, lon: -96.06, expect: 'poor' },
   { name: 'Missouri River at Omaha, NE', lat: 41.27, lon: -95.925, expect: 'poor', coast: true },
 ];

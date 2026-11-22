@@ -54,12 +54,12 @@ export async function loadCell(name) {
 
 // ---------- Wind ----------
 
-const GRID = 1; // degrees; ERA5 is 0.25 deg but 1 deg keeps downloads small
+const GRID = 0.25; // degrees: ERA5's own grid, so each spot gets its nearest weather cell
 
 export function windCellKey(lat, lon) {
   const gl = Math.round(lat / GRID) * GRID;
   const gn = Math.round(lon / GRID) * GRID;
-  return `${gl.toFixed(1)},${gn.toFixed(1)}`;
+  return `${gl.toFixed(2)},${gn.toFixed(2)}`;
 }
 
 const windMem = new Map();

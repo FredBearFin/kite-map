@@ -385,7 +385,29 @@ function renderSpots() {
     .slice(0, 150);
   const ol = $('spot-list');
   ol.innerHTML = '';
-  for (const { f, d } of list) {
+  // Launch spots on coasts, bays and rivers (lake shores are covered by the lakes).
+  const shoreSpots = (state.spots || [])
+    .filter((sp) => !inView || (sp.c.lon >= vb[0] && sp.c.lon <= vb[2] && sp.c.lat >= vb[1] && sp.c.lat <= vb[3]))
+    .filter((sp) => !q && !state.lakes.some((f) => pointInLake(f, sp.c.lon, sp.c.lat)))
+    .map((sp) => ({ sp, d: distanceFromHome({ properties: { _c: [sp.c.lon, sp.c.lat] } }, state.home) }))
+    .filter((x) => estimateDriveHours(x.d) <= maxH)
+    .slice(0, 40);
+  const rows = [...list.map((x) => ({ ...x, score: x.f.properties.score })), ...shoreSpots.map((x) => ({ ...x, score: x.sp.score }))].sort((a, b) => b.score - a.score);
+  for (const r of rows) {
+    if (r.sp) {
+      const { sp, d } = r;
+      const li = document.createElement('li');
+      li.innerHTML = `<div class="score" style="background:${scoreColor(sp.score)}">${sp.score}</div>
+        <div class="grow"><div class="name">${sp.c.river ? 'River launch' : 'Shore launch'}</div>
+        <div class="sub">Shore facing ${sp.c.face} · ~${fmtH(estimateDriveHours(d))} drive</div></div>`;
+      li.addEventListener('click', () => {
+        map.flyTo({ center: [sp.c.lon, sp.c.lat], zoom: Math.max(map.getZoom(), 12) });
+        showSpotPopup(sp.raw, sp.c.lon, sp.c.lat, 'Launch spot');
+      });
+      ol.appendChild(li);
+      continue;
+    }
+    const { f, d } = r;
     const p = f.properties;
     const li = document.createElement('li');
     li.innerHTML = `<div class="score" style="background:${scoreColor(p.score)}">${p.score}</div>
@@ -683,7 +705,7 @@ const windCache = new Map();
 async function preloadWind(points) {
   for (const [lat, lon] of points) {
     const k = windCellKey(lat, lon);
-    if (!windCache.has(k)) windCache.set(k, await getWind(lat, lon));
+    if (!windCache.get(k)) windCache.set(k, await getWind(lat, lon));
   }
 }
 const windAt = (lat, lon) => windCache.get(windCellKey(lat, lon)) || null;
@@ -693,6 +715,18 @@ async function refreshSpots() {
   const pts = new Set();
   for (const r of raws) for (const c of r?.cand || []) pts.add(windCellKey(c.lat, c.lon));
   await preloadWind([...pts].map((k) => k.split(',').map(Number)));
+  // Wind history for the shores in view, when online (a few points at a time).
+  const missing = [...pts].filter((k) => !windCache.get(k));
+  if (missing.length && navigator.onLine && !windBusy) {
+    windBusy = true;
+    try {
+      await downloadWind(missing.slice(0, 24), (d, t) => setBanner(`Getting wind history for these shores: ${d} of ${t} points...`), null, { retries: 0 });
+      await preloadWind(missing.map((k) => k.split(',').map(Number)));
+    } catch {
+    } finally {
+      windBusy = false;
+    }
+  }
   state.spots = pickSpots(raws, windAt, state.mode);
   map.getSource('spots')?.setData(fc(state.spots.map((s, i) => ({ type: 'Feature', id: i, properties: { i, score: s.score }, geometry: { type: 'Point', coordinates: [s.c.lon, s.c.lat] } }))));
   if ($('f-view').checked) renderSpots();
