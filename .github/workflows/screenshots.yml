@@ -23,6 +23,8 @@ jobs:
           npx vite preview --port 4173 &
           sleep 3
           node tools/screenshots.cjs screenshots
+          DPR=1 node tools/screenshots.cjs screenshots/dpr1 || true
+          for f in screenshots/dpr1/*.png; do cp "$f" "screenshots/dpr1-$(basename $f)"; done
       - uses: actions/upload-artifact@v4
         with:
           name: screenshots

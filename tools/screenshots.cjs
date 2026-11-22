@@ -26,7 +26,8 @@ async function waitIdle(page, ms = 240000) {
 (async () => {
   fs.mkdirSync(out, { recursive: true });
   const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
-  const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2 });
+  const DPR = +(process.env.DPR || 2);
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: DPR });
   page.on('console', (m) => ['error', 'warning'].includes(m.type()) && console.log('console:', m.text().slice(0, 200)));
   page.on('pageerror', (e) => console.log('pageerror:', String(e).slice(0, 300)));
   await page.goto('http://localhost:4173');
