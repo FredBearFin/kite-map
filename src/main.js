@@ -4,12 +4,14 @@ import { layers, namedFlavor } from '@protomaps/basemaps';
 import { backend } from './backend.js';
 import { DIRS16, bboxIntersects, bboxOf } from './geo.js';
 import { lakesFromWater, bboxOverlap } from './osmwater.js';
-import { bestDirs, dayVerdict, estimateDriveHours, iceMonths } from './scoring.js';
+import { bestDirs, estimateDriveHours, iceMonths } from './scoring.js';
 import { registerProtocol, glyphsTemplate, assetUrl, ASSETS, status, tileTemplate, initBasemap, prefetchWorld } from './tiles.js';
 import { HYDROLAKES_PAGE, HYDROLAKES_URL, lakeIndex, lakeSites, downloadWind, windCellKey, cellsFor, distanceFromHome, driveRoute, filterBbox, forecast, forecastMany, getWind, lakeCenter, loadCell, pointInLake, scoreFeatures } from './lakes.js';
 import { analyzeLake, analyzePoint, boxesIn, pickSpots, scanBox } from './siteapp.js';
 import { explain, launches, scoreSite, angleWord } from './spotscore.js';
 import { enterSpotView, spotViewControl } from './spotview.js';
+import { forecastDays, windowText } from './forecastscore.js';
+import { accessKey, accessReasons, fetchAccess } from './access.js';
 import { attachWaterColors } from './watercolor.js';
 import { downloadRegion, estimate, DEFAULTS } from './download.js';
 
@@ -117,11 +119,17 @@ map.once('style.load', () => {
   map.addSource('spots', { type: 'geojson', data: fc([]) });
   map.addLayer({
     id: 'spot-pt', type: 'circle', source: 'spots', minzoom: 8,
-    paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 5, 13, 10], 'circle-color': SCORE_COLOR, 'circle-stroke-color': '#fff', 'circle-stroke-width': 1.5 },
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 5, 13, 10],
+      // With a forecast day picked: green = go, yellow = maybe, grey = no.
+      'circle-color': ['match', ['coalesce', ['get', 'fc'], ''], 'go', '#2a9d55', 'maybe', '#f2c14e', 'no', '#aab4bf', SCORE_COLOR],
+      'circle-stroke-color': ['match', ['get', 'access'], 'no', '#c62828', 'limited', '#b26a00', '#fff'],
+      'circle-stroke-width': ['match', ['get', 'access'], 'no', 3, 'limited', 2.5, 1.5],
+    },
   });
   map.addLayer({
     id: 'spot-label', type: 'symbol', source: 'spots', minzoom: 10,
-    layout: { 'text-field': ['to-string', ['get', 'score']], 'text-font': ['Noto Sans Medium'], 'text-size': 10, 'text-allow-overlap': true },
+    layout: { 'text-field': ['coalesce', ['get', 'fcText'], ['to-string', ['get', 'score']]], 'text-font': ['Noto Sans Medium'], 'text-size': 10, 'text-allow-overlap': true },
     paint: { 'text-color': '#1d2733' },
   });
   // Best launch points of the lake or spot that is open.
@@ -584,52 +592,16 @@ async function showForecast(box, lat, lon, suit) {
   box.textContent = 'Loading forecast...';
   try {
     const r = await forecast(lat, lon);
-    const h = r.hourly;
-    const days = new Map();
-    for (let i = 0; i < h.time.length; i++) {
-      const [day, time] = h.time[i].split('T');
-      const hr = +time.slice(0, 2);
-      if (hr < 9 || hr > 19) continue;
-      const s = h.wind_speed_10m[i];
-      const dir = Math.round((h.wind_direction_10m[i] % 360) / 22.5) % 16;
-      const e = days.get(day) || { good: 0, ok: 0, max: 0, dirs: new Array(16).fill(0) };
-      if (s >= 12 && s <= 35) {
-        e.ok++;
-        e.dirs[dir]++;
-        if (!suit || suit[dir] >= 0.6) e.good++;
-      }
-      e.max = Math.max(e.max, h.wind_gusts_10m[i] ?? s);
-      days.set(day, e);
-    }
-    box.innerHTML = '<b>Kiteable daylight hours (12 to 35 kn)</b>';
-    const verdicts = groupDays(r, suit);
-    for (const [day, e] of days) {
-      const top = e.dirs.indexOf(Math.max(...e.dirs));
+    const days = forecastDays(r, suit || null, state.mode);
+    box.innerHTML = '<b>Next 7 days here</b> <span class="sub">(best window of daylight hours that work at this shore)</span>';
+    for (const [day, v] of days) {
       const row = document.createElement('div');
-      const name = new Date(day + 'T12:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
-      const v = verdicts.get(day)?.verdict || 'no';
-      row.innerHTML = `<span><span class="v-${v}" style="padding:0 5px">${v.toUpperCase()}</span> ${name}</span><span>${e.ok ? `${e.ok} h from ${DIRS16[top]}${e.good ? `, ${e.good} h good here` : ''}` : 'too light or too strong'} · gusts ${Math.round(e.max)} kn</span>`;
+      row.innerHTML = `<span><span class="v-${v.verdict}" style="padding:0 5px">${v.verdict.toUpperCase()}</span> ${new Date(day + 'T12:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}</span><span>${v.window ? windowText(v.window) + (v.gusty ? ' · gusty' : '') : v.kite ? `${v.kite} h of wind, from a poor direction here` : 'too light or too strong'}</span>`;
       box.appendChild(row);
     }
   } catch (e) {
     box.textContent = 'Forecast needs an internet connection.';
   }
-}
-
-/** Per-day verdicts from an Open-Meteo hourly forecast (local times). */
-function groupDays(r, suit) {
-  const h = r.hourly;
-  const days = new Map();
-  for (let i = 0; i < h.time.length; i++) {
-    const [day, time] = h.time[i].split('T');
-    const hr = +time.slice(0, 2);
-    if (!days.has(day)) days.set(day, []);
-    if (hr < 9 || hr > 19) continue;
-    days.get(day).push({ kn: h.wind_speed_10m[i], dir: h.wind_direction_10m[i] });
-  }
-  const out = new Map();
-  for (const [day, hours] of days) out.set(day, dayVerdict(hours, suit));
-  return out;
 }
 
 // ---------- Forecast tab ----------
@@ -639,67 +611,124 @@ function lakeAt(lon, lat, lakeId) {
   return state.lakes.find((f) => pointInLake(f, lon, lat)) || null;
 }
 
+/** Name for a forecast target: the lake it is on, or its coordinates. */
+function placeName(lat, lon) {
+  const lake = lakeAt(lon, lat);
+  return lake ? `${lakeName(lake.properties)} shore` : `Shore at ${lat.toFixed(3)}, ${lon.toFixed(3)}`;
+}
+
 function forecastTargets() {
-  const t = state.saved.map((s) => ({ name: s.name, lat: s.lat, lon: s.lon, lakeId: s.lakeId }));
+  const t = state.saved.map((s) => {
+    const lake = lakeAt(s.lon, s.lat, s.lakeId);
+    return { name: s.name, lat: s.lat, lon: s.lon, lakeId: s.lakeId, suit: lake ? lake.properties._suit : null, saved: true };
+  });
   if ($('fc-known').checked) {
     const vb = viewBbox();
-    const top = state.spots.filter((sp) => sp.c.lon >= vb[0] && sp.c.lon <= vb[2] && sp.c.lat >= vb[1] && sp.c.lat <= vb[3]).slice(0, 6);
-    for (const sp of top) t.push({ name: `Spot ${sp.c.lat.toFixed(3)}, ${sp.c.lon.toFixed(3)} (${sp.score})`, lat: sp.c.lat, lon: sp.c.lon, suit: scoreSite(sp.raw, windAt(sp.c.lat, sp.c.lon), state.mode).Q });
+    const top = state.spots.filter((sp) => sp.c.lon >= vb[0] && sp.c.lon <= vb[2] && sp.c.lat >= vb[1] && sp.c.lat <= vb[3]).slice(0, 20);
+    for (const sp of top) t.push({ name: placeName(sp.c.lat, sp.c.lon), lat: sp.c.lat, lon: sp.c.lon, score: sp.score, suit: scoreSite(sp.raw, windAt(sp.c.lat, sp.c.lon), state.mode).Q });
   }
   return t;
 }
 
-$('fc-refresh').onclick = async () => {
+async function checkForecast() {
   const targets = forecastTargets();
-  if (!targets.length) return ($('fc-status').textContent = 'Save a spot first (click a lake, then Save spot).');
-  $('fc-status').textContent = 'Checking forecast...';
+  if (!targets.length) return ($('fc-status').textContent = 'Move the map to some water (spots are found as you look around), or save a spot first.');
+  $('fc-status').textContent = `Checking the forecast for ${targets.length} spots...`;
   try {
     const results = await forecastMany(targets.map((t) => [t.lat, t.lon]));
-    state.fcData = { fetched: Date.now(), targets, results };
+    state.fcData = { fetched: Date.now(), targets, results, mode: state.mode };
     await backend.kvSet('forecast/last', state.fcData);
     renderForecast();
   } catch (e) {
     $('fc-status').textContent = 'The forecast needs an internet connection.' + (state.fcData ? ' Showing the last one.' : '');
   }
-};
-$('fc-known').onchange = () => $('fc-refresh').click();
+}
+$('fc-refresh').onclick = checkForecast;
+$('fc-known').onchange = checkForecast;
+// Opening the tab fetches a fresh forecast when the saved one is old.
+document.querySelector('#tabs button[data-tab="forecast"]').addEventListener('click', () => {
+  const age = state.fcData ? (Date.now() - state.fcData.fetched) / 3600e3 : Infinity;
+  if (age > 3 && navigator.onLine) checkForecast();
+});
+
+const dayName = (d, long) => new Date(d + 'T12:00').toLocaleDateString(undefined, long ? { weekday: 'long', month: 'short', day: 'numeric' } : { weekday: 'short' });
 
 function renderForecast() {
   const data = state.fcData;
   if (!data) return;
   const age = (Date.now() - data.fetched) / 3600e3;
   $('fc-status').textContent = `Updated ${new Date(data.fetched).toLocaleString()}${age > 12 ? ' (old, check again when online)' : ''}. Drive times are estimates from ${state.home.name}.`;
-  const rows = data.targets.map((t, i) => {
-    const lake = lakeAt(t.lon, t.lat, t.lakeId);
-    const days = groupDays(data.results[i], t.suit || (lake ? lake.properties._suit : null));
-    return { t, lake, days, drive: estimateDriveHours(distanceFromHome({ properties: { _c: [t.lon, t.lat] } }, state.home)) };
-  });
-  rows.sort((a, b) => countGo(b.days) - countGo(a.days) || a.drive - b.drive);
+  const rows = data.targets.map((t, i) => ({
+    t,
+    days: forecastDays(data.results[i], t.suit || null, data.mode || state.mode),
+    drive: estimateDriveHours(distanceFromHome({ properties: { _c: [t.lon, t.lat] } }, state.home)),
+  }));
+  state.fcByKey = new Map(rows.map((r) => [accessKey(r.t.lat, r.t.lon), r.days]));
+  const weight = (r, v) => v.good * (0.5 + (r.t.score ?? 70) / 200);
+  rows.sort((a, b) => [...b.days.values()].reduce((s, v) => s + weight(b, v), 0) - [...a.days.values()].reduce((s, v) => s + weight(a, v), 0) || a.drive - b.drive);
   const dayKeys = [...(rows[0]?.days.keys() || [])].slice(0, 7);
+
+  // Best sessions: the longest good windows across all spots and days.
+  const sessions = [];
+  for (const r of rows) for (const [d, v] of r.days) if (v.verdict === 'go' && v.window) sessions.push({ r, d, v });
+  sessions.sort((a, b) => a.d.localeCompare(b.d) || weight(b.r, b.v) - weight(a.r, a.v));
+  const perDay = new Map();
+  for (const x of sessions) { const l = perDay.get(x.d) || []; if (l.length < 2) l.push(x); perDay.set(x.d, l); }
+  const best = $('fc-best');
+  best.innerHTML = '';
+  if (!perDay.size) best.innerHTML = '<p class="hint">No good sessions in the next 7 days for these spots. Try moving the map to other water and checking again.</p>';
+  else best.insertAdjacentHTML('beforeend', '<h5>Best sessions</h5>');
+  for (const [d, list] of perDay) {
+    for (const { r, v } of list) {
+      const el = document.createElement('div');
+      el.className = 'fc-session';
+      el.innerHTML = `<div><b>${dayName(d, true)}</b> · ${fmtH(r.drive)} drive</div><div class="name"></div><div class="sub">${windowText(v.window)}${v.gusty ? ' · gusty' : ''}</div>`;
+      el.querySelector('.name').textContent = r.t.name + (r.t.score != null ? ` (score ${r.t.score})` : '');
+      el.onclick = () => { pickDay(d); map.flyTo({ center: [r.t.lon, r.t.lat], zoom: 12.5 }); };
+      best.appendChild(el);
+    }
+  }
+
+  // Day picker: colours the spots on the map for that day.
+  const chips = $('fc-days');
+  chips.innerHTML = '<span class="hint">Show on the map:</span>';
+  for (const d of [null, ...dayKeys]) {
+    const b = document.createElement('button');
+    b.textContent = d ? `${dayName(d)} ${+d.slice(8)}` : 'Off';
+    b.classList.toggle('on', (state.fcDay || null) === d);
+    b.onclick = () => pickDay(d);
+    chips.appendChild(b);
+  }
+
   const table = document.createElement('table');
   table.className = 'fc-grid';
-  table.innerHTML = `<tr><th></th><th>Drive</th>${dayKeys.map((d) => `<th>${new Date(d + 'T12:00').toLocaleDateString(undefined, { weekday: 'short' })}<br>${+d.slice(8)}</th>`).join('')}</tr>`;
+  table.innerHTML = `<tr><th></th><th>Drive</th>${dayKeys.map((d) => `<th class="${state.fcDay === d ? 'on' : ''}">${dayName(d)}<br>${+d.slice(8)}</th>`).join('')}</tr>`;
   for (const r of rows) {
     const tr = document.createElement('tr');
     const cells = dayKeys
       .map((d) => {
         const v = r.days.get(d);
         if (!v) return '<td></td>';
-        const tip = `${v.kite} h kiteable${v.topDir != null ? ', mostly from ' + DIRS16[v.topDir] : ''}${r.lake ? `, ${v.good} h from a good direction here` : ''}`;
-        return `<td title="${tip}"><span class="v-${v.verdict}" style="display:block;padding:2px 0">${v.verdict === 'no' ? '·' : r.lake ? v.good : v.kite}</span></td>`;
+        const tip = v.window ? `Best: ${windowText(v.window)}. ${v.good} good hours.` : `${v.kite} kiteable hours${v.topDir != null ? ', mostly from ' + DIRS16[v.topDir] + ', a poor direction here' : ''}.`;
+        return `<td title="${esc(tip)}"><span class="v-${v.verdict}" style="display:block;padding:2px 0">${v.verdict === 'no' ? '·' : v.good}${v.gusty && v.verdict !== 'no' ? '~' : ''}</span></td>`;
       })
       .join('');
     tr.innerHTML = `<td class="spot"></td><td>${fmtH(r.drive)}</td>${cells}`;
     tr.querySelector('.spot').textContent = r.t.name;
-    tr.querySelector('.spot').title = r.lake ? 'Hours shown: good-direction kiteable hours' : 'No lake data here yet: hours shown are kiteable hours from any direction';
-    tr.querySelector('.spot').onclick = () => (r.lake ? focusLake(r.lake) : map.flyTo({ center: [r.t.lon, r.t.lat], zoom: 11 }));
+    tr.querySelector('.spot').title = r.t.name;
+    tr.querySelector('.spot').onclick = () => map.flyTo({ center: [r.t.lon, r.t.lat], zoom: 12.5 });
     table.appendChild(tr);
   }
   $('fc-table').innerHTML = '';
   $('fc-table').appendChild(table);
+  publishSpots();
 }
 
-const countGo = (days) => [...days.values()].filter((v) => v.verdict === 'go').length;
+function pickDay(d) {
+  state.fcDay = d;
+  renderForecast();
+}
+
 
 // ---------- Discovered launch spots ----------
 
@@ -733,8 +762,57 @@ async function refreshSpots() {
     }
   }
   state.spots = pickSpots(raws, windAt, state.mode);
-  map.getSource('spots')?.setData(fc(state.spots.map((s, i) => ({ type: 'Feature', id: i, properties: { i, score: s.score }, geometry: { type: 'Point', coordinates: [s.c.lon, s.c.lat] } }))));
+  await applyAccess(true);
+  checkAccess();
+}
+
+// ---------- Launch access (OpenStreetMap) ----------
+
+state.access = new Map();
+/** Fold the saved access checks into the spot scores and redraw the spots. */
+async function applyAccess(loadSaved = false) {
+  if (loadSaved) {
+    const got = await fetchAccess(state.spots.map((sp) => [sp.c.lat, sp.c.lon]), backend, null, { online: false });
+    for (const [k, v] of got) state.access.set(k, v);
+  }
+  for (const sp of state.spots) {
+    sp.base ??= sp.score;
+    const a = state.access.get(accessKey(sp.c.lat, sp.c.lon));
+    sp.access = a || null;
+    sp.score = a ? Math.round(sp.base * a.factor) : sp.base;
+  }
+  state.spots.sort((a, b) => b.score - a.score);
+  publishSpots();
+}
+
+function publishSpots() {
+  const day = state.fcDay;
+  const byKey = state.fcByKey || new Map();
+  map.getSource('spots')?.setData(fc(state.spots.map((s, i) => {
+    const props = { i, score: s.score, access: s.access?.level || '' };
+    const f = day && byKey.get(accessKey(s.c.lat, s.c.lon))?.get(day);
+    if (day) { props.fc = f ? f.verdict : 'none'; if (f?.window) props.fcText = `${s.score} · ${windowText(f.window).split(',')[0]}`; }
+    return { type: 'Feature', id: i, properties: props, geometry: { type: 'Point', coordinates: [s.c.lon, s.c.lat] } };
+  })));
   if ($('f-view').checked) renderSpots();
+}
+
+let accessBusy = false;
+/** Check access online for the best spots that have not been checked yet. */
+async function checkAccess() {
+  if (accessBusy || !navigator.onLine) return;
+  const todo = state.spots.filter((sp) => !state.access.has(accessKey(sp.c.lat, sp.c.lon))).slice(0, 25);
+  if (!todo.length) return;
+  accessBusy = true;
+  try {
+    const got = await fetchAccess(todo.map((sp) => [sp.c.lat, sp.c.lon]), backend, (u, o) => backend.httpJson(u, o), { online: true, max: 25 });
+    for (const [k, v] of got) state.access.set(k, v);
+    await applyAccess();
+  } catch (e) {
+    console.warn('access check', e);
+  } finally {
+    accessBusy = false;
+  }
 }
 
 let scanBusy = false;
@@ -837,6 +915,7 @@ async function showSpotPopup(raw, lon, lat, title) {
       <div class="sub" style="margin-top:4px">${scoreText({ basis: s.basis === 'site' ? 'wind' : s.basis, eff: s.eff })}</div></div></div>
     <div class="sub">Petals: how often the wind blows from there. Green: works well from this shore.</div>
     <h5>Why this score</h5>${reasonsHtml(explain(s, raw, state.mode))}
+    <h5>Launch and access</h5><div class="access sub">Checking the map for beaches, ramps, parking and private land...</div>
     ${monthSvg(wind)}
     <div class="actions"><button class="view3d primary">3D spot view</button><button class="save">Save spot</button><button class="fcbtn">7-day forecast</button><button class="gmap">Copy coordinates</button></div>
     <div class="fc"></div>`;
@@ -855,6 +934,33 @@ async function showSpotPopup(raw, lon, lat, title) {
   popup.on('close', () => showLaunches([]));
   showLaunches(launches(s, raw));
   if (navigator.onLine) fillDrive(el, lon, lat);
+  fillAccess(el, lat, lon, s.score);
+}
+
+async function fillAccess(el, lat, lon, score) {
+  const box = el.querySelector('.access');
+  const k = accessKey(lat, lon);
+  try {
+    let a = state.access.get(k);
+    if (!a) {
+      const got = await fetchAccess([[lat, lon]], backend, (u, o) => backend.httpJson(u, o), { online: navigator.onLine });
+      a = got.get(k);
+      if (a) { state.access.set(k, a); applyAccess(); }
+    }
+    if (!a) { box.textContent = 'Access check needs an internet connection the first time.'; return; }
+    box.classList.remove('sub');
+    box.innerHTML = reasonsHtml(accessReasons(a));
+    if (a.factor < 1) {
+      const sc = el.querySelector('.score');
+      const adj = Math.round(score * a.factor);
+      sc.textContent = adj;
+      sc.style.background = scoreColor(adj);
+      sc.title = `${score} for wind and shore, lowered to ${adj} for access and hazards`;
+      box.insertAdjacentHTML('afterbegin', `<div class="sub">Score lowered from ${score} to ${adj} for access and hazards.</div>`);
+    }
+  } catch (e) {
+    box.textContent = 'Could not check access right now.';
+  }
 }
 
 map.on('click', 'spot-pt', (e) => {

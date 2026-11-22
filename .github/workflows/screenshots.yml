@@ -27,6 +27,7 @@ jobs:
         run: |
           sudo apt-get install -y -qq ffmpeg >/dev/null
           for d in screenshots/frames-*; do
+            [ -d "$d" ] || continue
             n=${d#screenshots/frames-}
             ffmpeg -loglevel error -y -framerate 4 -i "$d/%03d.png" -vf "scale=960:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=160[p];[b][p]paletteuse=dither=bayer" "screenshots/anim-$n.gif"
           done
@@ -41,7 +42,7 @@ jobs:
         run: |
           set -e
           sha=${GITHUB_SHA::7}
-          mkdir -p /tmp/shots && cp screenshots/*.png screenshots/*.gif /tmp/shots/
+          mkdir -p /tmp/shots && cp screenshots/*.png /tmp/shots/ && (cp screenshots/*.gif /tmp/shots/ 2>/dev/null || true)
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin screenshots || true

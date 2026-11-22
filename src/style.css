@@ -127,3 +127,14 @@ ul.why li span { flex: none; width: 12px; text-align: center; }
 #sv-panel .sv-note { color: #8a97a5; font-size: 11px; margin-top: 4px; }
 @media (max-width: 600px) { #sv-panel { width: auto; right: 10px; max-height: 45%; } }
 .maplibregl-popup-content .pop { max-height: min(70vh, 640px); overflow-y: auto; }
+
+/* Forecast tab */
+.fc-days { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 6px 0; }
+.fc-days button { padding: 2px 7px; font-size: 12px; }
+.fc-days button.on { background: #12658f; color: #fff; }
+.fc-grid th.on { color: #12658f; text-decoration: underline; }
+.fc-session { border: 1px solid var(--line); border-left: 4px solid #2a9d55; border-radius: 6px; padding: 5px 8px; margin: 4px 0; cursor: pointer; font-size: 12.5px; }
+.fc-session:hover { background: #f1f6fa; }
+.fc-session .name { font-weight: 600; }
+#fc-best h5 { margin: 8px 0 2px; }
+.pop .access .why { margin-top: 2px; }

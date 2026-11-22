@@ -66,11 +66,37 @@ async function snap3d(page, path) {
   await page.waitForFunction(() => window.__kite.state.spots.length > 0 && document.getElementById('banner').hidden, null, { timeout: 240000, polling: 2000 }).catch(() => console.log('scan did not finish in time'));
   await page.waitForTimeout(8000);
   console.log(`scan ${((Date.now() - t0) / 1000).toFixed(0)} s, spots`, await page.evaluate(() => window.__kite.state.spots.slice(0, 5).map((s) => s.score)));
+  // Access checks run in the background after the scan.
+  await page.waitForFunction(() => window.__kite.state.access?.size > 0, null, { timeout: 120000, polling: 2000 }).catch(() => console.log('no access checks'));
+  await page.waitForTimeout(3000);
+  console.log('access', await page.evaluate(() => [...window.__kite.state.access.values()].slice(0, 8).map((a) => `${a.level} ${a.factor} ${a.items.map((i) => i.kind).join('/')}`)));
   await page.screenshot({ path: `${out}/1-map-spots.png` });
 
   await page.evaluate(() => window.__kite.spotPopup(0));
-  await page.waitForTimeout(4000);
+  await page.waitForSelector('.pop .access .why', { timeout: 90000 }).catch(() => console.log('popup access not filled'));
+  await page.waitForTimeout(1500);
   await page.screenshot({ path: `${out}/2-spot-popup.png` });
+  await page.evaluate(() => document.querySelector('.pop .access')?.previousElementSibling?.scrollIntoView({ block: 'start' }));
+  await page.waitForTimeout(800);
+  await page.screenshot({ path: `${out}/3-spot-popup-access.png` });
+  await page.evaluate(() => document.querySelector('.maplibregl-popup-close-button')?.click());
+
+  // Forecast tab: opening it fetches the forecast for the spots in view.
+  await page.evaluate(() => document.querySelector('#tabs button[data-tab="forecast"]').click());
+  await page.waitForSelector('#fc-table table', { timeout: 120000 }).catch(() => console.log('forecast did not load'));
+  await page.waitForTimeout(2000);
+  await page.screenshot({ path: `${out}/4-forecast.png` });
+  // Colour the map for the day with the most "go" spots.
+  await page.evaluate(() => {
+    const ths = [...document.querySelectorAll('.fc-grid th')].slice(2);
+    const rows = [...document.querySelectorAll('.fc-grid tr')].slice(1);
+    let bestI = 0, bestN = -1;
+    ths.forEach((_, i) => { const n = rows.filter((r) => r.children[i + 2]?.querySelector('.v-go')).length; if (n > bestN) { bestN = n; bestI = i; } });
+    document.querySelectorAll('#fc-days button')[bestI + 1]?.click();
+  });
+  await page.waitForTimeout(4000);
+  await page.screenshot({ path: `${out}/5-forecast-map-day.png` });
+  if (!process.env.FULL_3D) { await browser.close(); return; }
 
   await page.evaluate(() => window.__kite.spotView(0));
   await page.evaluate(() => window.__kite.sv.pause());

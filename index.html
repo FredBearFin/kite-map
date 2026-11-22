@@ -52,10 +52,12 @@
           <ol id="spot-list"></ol>
         </section>
         <section id="tab-forecast" class="tab">
-          <p class="hint">Next 7 days for your saved spots. <b>Go</b>: 3 or more daylight hours of 12 to 35 kn from a direction that works on that lake. <b>Maybe</b>: some kiteable wind, but short or from a poor direction.</p>
+          <p class="hint">Which spots work when, over the next 7 days. Each hour is rated with that shore's own setup: wind speed 12 to 35 kn (12 to 22 in beginner mode), from a direction that works at that launch, and not too gusty. <b>Go</b>: 3 or more good hours in a row. Numbers are good hours; ~ means gusty.</p>
           <label class="check"><input id="fc-known" type="checkbox" checked /> Include the best launch spots found in view</label>
           <div class="row"><button id="fc-refresh" class="primary">Check forecast</button></div>
           <p id="fc-status" class="hint"></p>
+          <div id="fc-days" class="fc-days"></div>
+          <div id="fc-best"></div>
           <div id="fc-table"></div>
         </section>
         <section id="tab-regions" class="tab">

@@ -63,12 +63,12 @@ export const backend = {
    * GET a URL. With key: saved, and served from the saved copy next time
    * (unless refresh). Range = [start, length] for partial reads.
    */
-  async httpGet(url, { key = null, range = null, refresh = false } = {}) {
+  async httpGet(url, { key = null, range = null, refresh = false, body = null } = {}) {
     if (!isTauri) {
       if (key && !refresh && mem.has(key)) return mem.get(key);
       const headers = range ? { Range: `bytes=${range[0]}-${range[0] + range[1] - 1}` } : {};
       try {
-        const r = await fetch(url, { headers });
+        const r = await fetch(url, body != null ? { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body } : { headers });
         if (!r.ok) throw new Error(`http ${r.status}`);
         const b = new Uint8Array(await r.arrayBuffer());
         if (key) mem.set(key, b);
@@ -84,6 +84,7 @@ export const backend = {
       rangeStart: range ? range[0] : null,
       rangeLen: range ? range[1] : null,
       refresh,
+      body,
     });
     return toBytes(out);
   },

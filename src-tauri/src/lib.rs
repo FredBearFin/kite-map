@@ -138,6 +138,7 @@ async fn http_get(
     range_start: Option<u64>,
     range_len: Option<u64>,
     refresh: Option<bool>,
+    body: Option<String>,
 ) -> Result<Response, String> {
     let refresh = refresh.unwrap_or(false);
     if let Some(k) = &key {
@@ -147,7 +148,11 @@ async fn http_get(
             }
         }
     }
-    let mut req = state.http.get(&url);
+    // A body makes it a form POST (used for long Overpass queries).
+    let mut req = match &body {
+        Some(b) => state.http.post(&url).header("Content-Type", "application/x-www-form-urlencoded").body(b.clone()),
+        None => state.http.get(&url),
+    };
     if let (Some(start), Some(len)) = (range_start, range_len) {
         req = req.header("Range", format!("bytes={}-{}", start, start + len - 1));
     }
