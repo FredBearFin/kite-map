@@ -23,6 +23,30 @@ async function waitIdle(page, ms = 240000) {
   console.log(`idle ${ok} after ${((Date.now() - t0) / 1000).toFixed(0)} s`);
 }
 
+// The CI machine draws 3D in software, so a normal page screenshot can wait
+// minutes for a frame. Copy the map's last frame into an image over the map,
+// hide the WebGL canvas, then take the page screenshot.
+async function snap3d(page, path) {
+  await page.evaluate(() => document.getElementById('snap')?.remove());
+  await page.evaluate(() => { window.__kite.map.getCanvas().style.visibility = 'visible'; });
+  const url = await page.evaluate(() => new Promise((res) => {
+    const m = window.__kite.map;
+    m.once('render', () => res(m.getCanvas().toDataURL('image/png')));
+    m.triggerRepaint();
+  }));
+  await page.evaluate((u) => {
+    const img = document.createElement('img');
+    img.id = 'snap';
+    img.src = u;
+    Object.assign(img.style, { position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', zIndex: 4, pointerEvents: 'none' });
+    document.getElementById('map').appendChild(img);
+    window.__kite.map.getCanvas().style.visibility = 'hidden';
+  }, url);
+  await page.waitForTimeout(1500);
+  await page.screenshot({ path, timeout: 300000 });
+  await page.evaluate(() => { document.getElementById('snap')?.remove(); window.__kite.map.getCanvas().style.visibility = 'visible'; });
+}
+
 (async () => {
   fs.mkdirSync(out, { recursive: true });
   const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
@@ -50,12 +74,12 @@ async function waitIdle(page, ms = 240000) {
 
   await page.evaluate(() => window.__kite.spotView(0));
   await waitIdle(page);
-  await page.screenshot({ path: `${out}/3-spot-3d.png`, timeout: 120000 });
+  await snap3d(page, `${out}/3-spot-3d.png`);
 
   // Look around: turn right and show another wind direction.
   await page.evaluate(() => document.querySelectorAll('#sv-panel .sv-dirs button')[1]?.click());
   await waitIdle(page);
-  await page.screenshot({ path: `${out}/4-spot-3d-other-wind.png`, timeout: 120000 });
+  await snap3d(page, `${out}/4-spot-3d-other-wind.png`);
   console.log('3d', await page.evaluate(() => { const m = window.__kite.map; return JSON.stringify({ pitch: m.getPitch(), zoom: m.getZoom(), elev: m.transform?.elevation }); }));
   await browser.close();
 })();
