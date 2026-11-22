@@ -173,6 +173,14 @@ function setDir(d, fly) {
   map.getSource('sv-arrows').setData(fc(g.arrows));
   // Stand on the shore behind the launch, looking out over the water.
   map.easeTo({ center: offset([c.lon, c.lat], g.water, 220), zoom: 15.6, pitch: 72, bearing: g.water, padding: panelPadding(), duration: fly ? 1800 : 900 });
+  // The ground height under the view only updates when the camera moves. If
+  // the terrain tiles arrive after the flight ends, the camera can be left
+  // below the ground (a blank view), so nudge it once they have loaded.
+  map.once('moveend', () => {
+    const fix = () => state && map.jumpTo({ center: map.getCenter() });
+    fix();
+    map.once('idle', fix);
+  });
   renderGuide(c, d, g);
   document.querySelectorAll('#sv-panel .sv-dirs button').forEach((b) => b.classList.toggle('on', +b.dataset.d === d));
 }
