@@ -17,7 +17,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm install --no-save playwright@1.49.1 && npx playwright install --with-deps chromium
+      - run: npm install --no-save playwright@1.63.0 && npx playwright install --with-deps chromium
       - run: npx vite build
       - run: |
           npx vite preview --port 4173 &
