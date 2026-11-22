@@ -103,13 +103,13 @@ async function snap3d(page, path) {
         let done = false;
         const grab = () => { if (done) return; done = true; m.once('render', () => res(m.getCanvas().toDataURL('image/png'))); m.triggerRepaint(); };
         m.once('idle', grab);
-        setTimeout(grab, 20000);
+        setTimeout(grab, 8000);
       }), t0 + ((t1 - t0) * k) / n);
       fs.writeFileSync(`${out}/frames-${name}/${String(k).padStart(3, '0')}.png`, Buffer.from(url.split(',')[1], 'base64'));
     }
     console.log('frames', name, n);
   }
-  await frames('ride', 2, 0, 9, 30);
+  await frames('ride', 2, 0, 9, 27);
   await frames('launch', 1, 0, 14, 28);
   await browser.close();
 })();

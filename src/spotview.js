@@ -52,6 +52,11 @@ function sector(center, a0, a1, r, r0 = 0, n = 16) {
 }
 
 const feat = (geometry, properties = {}) => ({ type: 'Feature', geometry, properties });
+/** A zone polygon plus one label point at its centre (polygon labels repeat per tile). */
+const zone = (zones, geometry, labelAt, properties) => {
+  zones.push(feat(geometry, properties));
+  zones.push({ type: 'Feature', geometry: { type: 'Point', coordinates: labelAt }, properties });
+};
 const line = (coords, properties) => feat({ type: 'LineString', coordinates: coords }, properties);
 const point = (c, properties) => feat({ type: 'Point', coordinates: c }, properties);
 const faceDeg = (face) => Math.max(0, DIRS16.indexOf(face)) * 22.5;
@@ -63,19 +68,19 @@ export function guideShapes(c, d) {
   const pt = [c.lon, c.lat];
   const water = faceDeg(c.face); // from the shore out over the water
   const zones = [];
-  zones.push(feat(circle(pt, 35), { kind: 'launch', label: 'Launch / land' }));
+  zone(zones, circle(pt, 35), pt, { kind: 'launch', label: 'Launch / land' });
   // Riding area: out from the shore, back and forth across the wind.
   const ride = offset(pt, water, 280);
-  zones.push(feat(rect(ride, from + 90, Math.max(200, Math.min(reach || 400, 1400)), 420), { kind: 'ride', label: 'Riding area (approx.)' }));
+  zone(zones, rect(ride, from + 90, Math.max(200, Math.min(reach || 400, 1400)), 420), offset(ride, from, 170), { kind: 'ride', label: 'Riding area (approx.)' });
   // Downwind of the launch: where you get dragged if the kite powers up.
-  zones.push(feat(rect(offset(pt, to, 70), to, 140, 90), { kind: 'downwind', label: 'Keep clear downwind' }));
+  zone(zones, rect(offset(pt, to, 70), to, 140, 90), offset(pt, to, 110), { kind: 'downwind', label: 'Keep clear downwind' });
   // Wind shadow behind the upwind shore.
   let shadow = null;
   if (!open && sh > 30 && W > 0) {
     const shore = offset(pt, from, W);
     const len = Math.min(sh, W);
     shadow = { start: -W, end: -W + len };
-    zones.push(feat(rect(offset(shore, to, len / 2), to, len, 350), { kind: 'shadow', label: 'Gusty wind shadow' }));
+    zone(zones, rect(offset(shore, to, len / 2), to, len, 350), offset(shore, to, len / 2), { kind: 'shadow', label: 'Gusty wind shadow' });
   }
   // Where you drift if you let go: straight downwind to the next shore. The
   // open water downwind of the launch is the fetch for the opposite wind.
@@ -155,7 +160,7 @@ const ensureLayers = (map) => {
     },
   });
   add({
-    id: 'sv-zone-label', type: 'symbol', source: 'sv',
+    id: 'sv-zone-label', type: 'symbol', source: 'sv', filter: ['==', ['geometry-type'], 'Point'],
     layout: { 'text-field': ['get', 'label'], 'text-size': 12, 'text-font': ['Noto Sans Medium'], 'text-allow-overlap': true },
     paint: { 'text-color': '#ffffff', 'text-halo-color': '#1d2733', 'text-halo-width': 1.5 },
   });
@@ -310,7 +315,7 @@ function particleAt(p, bands, s) {
 // ---------------------------------------------------------------------------
 // Rider and kite.
 
-const KITE_L = 60; // line length as drawn (real lines are about 22 m)
+const KITE_L = 150; // line length as drawn (real lines are about 22 m), so the kite shows from afar
 
 /** Point in the launch frame: u metres downwind, v metres across (to the right looking upwind... +v = from + 90). */
 function at(g, u, v) {
@@ -321,7 +326,7 @@ function at(g, u, v) {
 function ridePose(g, t, kn) {
   const pace = kn < 10 ? 0.15 : clamp((kn - 6) / 12, 0.5, 1.3);
   const spd = 55 * pace;
-  const A = clamp((g.reach || 400) / 2 - 80, 120, 520), b = 40;
+  const A = clamp((g.reach || 400) / 2 - 80, 150, 420), b = 90;
   const leg = (2 * A) / spd, turn = (Math.PI * b) / spd, T = 2 * (leg + turn);
   let f = ((t % T) + T) % T;
   const low = kn < 10;
@@ -370,20 +375,20 @@ function riderFeatures(g, P) {
   const out = [];
   const p = at(g, P.u, P.v);
   // Rider and board (drawn about 3 times real size so they show).
-  out.push(feat(rect(p, P.az - 90, 4, 4), { part: 'rider', b: 0, h: 6 }));
-  out.push(feat(rect(p, P.az - 90, 9, 2.5), { part: 'board', b: 0, h: 0.8 }));
+  out.push(feat(rect(p, P.az - 90, 10, 10), { part: 'rider', b: 0, h: 16 }));
+  out.push(feat(rect(p, P.az - 90, 24, 7), { part: 'board', b: 0, h: 2 }));
   const er = rad(P.e);
   const L = KITE_L;
   const kp = offset(p, P.az, L * Math.cos(er));
-  const kh = 5 + L * Math.sin(er);
-  if (P.down) out.push(feat(rect(kp, P.az, 4, 16), { part: 'kite', b: 0, h: 0.8 }));
-  else out.push(feat(rect(kp, P.az, 4, 16), { part: 'kite', b: kh - 1.2, h: kh + 1.2 }));
+  const kh = 14 + L * Math.sin(er);
+  if (P.down) out.push(feat(rect(kp, P.az, 10, 40), { part: 'kite', b: 0, h: 2 }));
+  else out.push(feat(rect(kp, P.az, 10, 40), { part: 'kite', b: kh - 3, h: kh + 3 }));
   // Lines as a row of small floating dots from the rider up to the kite.
-  for (let k = 1; k < 14; k++) {
-    const f = k / 14;
-    out.push(feat(rect(offset(p, P.az, L * Math.cos(er) * f), 0, 1.4, 1.4), { part: 'line', b: 5 + (kh - 5) * f - 0.35, h: 5 + (kh - 5) * f + 0.35 }));
+  for (let k = 1; k < 18; k++) {
+    const f = k / 18;
+    out.push(feat(rect(offset(p, P.az, L * Math.cos(er) * f), 0, 3, 3), { part: 'line', b: 14 + (kh - 14) * f - 0.9, h: 14 + (kh - 14) * f + 0.9 }));
   }
-  if (P.helper) out.push(feat(rect(offset(kp, P.az + 180, 4), 0, 3, 3), { part: 'helper', b: 0, h: 5 }));
+  if (P.helper) out.push(feat(rect(offset(kp, P.az + 180, 10), 0, 8, 8), { part: 'helper', b: 0, h: 14 }));
   return { out, p, kp };
 }
 
@@ -420,7 +425,7 @@ function render() {
   const fx = [], solids = [], labels = [];
   const P = pose(g, key, t, kn);
   if (key === 'wind') {
-    labels.push(point(at(g, g.rideU - 350, g.rideV), { label: `Wind from ${DIRS16[state.d]}, ${kn} kn ↓`, size: 15 }));
+    labels.push(point(at(g, windCamU(g) - 120, g.rideV), { label: `Wind from ${DIRS16[state.d]}, ${kn} kn`, size: 16 }));
     labels.push(point(at(g, g.rideU + 120, g.rideV), { label: g.shadow ? 'Clean wind out here' : 'Clean, steady wind', size: 13, color: '#e3f2fd' }));
   }
   if (key === 'upwind') {
@@ -430,14 +435,14 @@ function render() {
     for (let i = 0; i <= 80; i++) { const q = ridePose(g, (i / 80) * T, kn); ring.push(at(g, q.u, q.v)); }
     fx.push(line(ring, { kind: 'path' }));
     const lost = [];
-    const A = clamp((g.reach || 400) / 2 - 80, 120, 520);
-    for (let i = 0; i <= 4; i++) lost.push(at(g, g.rideU + 25 + i * 70, g.rideV + (i % 2 ? A : -A)));
+    const A = clamp((g.reach || 400) / 2 - 80, 150, 420);
+    for (let i = 0; i <= 3; i++) lost.push(at(g, g.rideU + 90 + i * A * 0.45, g.rideV + (i % 2 ? A : -A)));
     fx.push(line(lost, { kind: 'drifty' }));
-    labels.push(point(at(g, g.rideU + 330, g.rideV), { label: 'Without riding upwind you drift this way', size: 12, color: '#ffcdd2' }));
-    const up0 = at(g, g.rideU - 70, g.rideV), up1 = at(g, g.rideU - 260, g.rideV);
+    labels.push(point(at(g, g.rideU + 90 + 1.5 * clamp((g.reach || 400) / 2 - 80, 150, 420) * 0.45, g.rideV), { label: 'Without riding upwind you drift this way', size: 12, color: '#ffcdd2' }));
+    const up0 = at(g, g.rideU - 130, g.rideV), up1 = at(g, g.rideU - 330, g.rideV);
     fx.push(line([up0, up1], { kind: 'upwind' }));
     fx.push(line([offset(up1, g.to + 30, 40), up1, offset(up1, g.to - 30, 40)], { kind: 'upwind' }));
-    labels.push(point(at(g, g.rideU - 300, g.rideV), { label: 'Upwind', size: 14, color: '#b9f6ca' }));
+    labels.push(point(at(g, g.rideU - 370, g.rideV), { label: 'Upwind', size: 14, color: '#b9f6ca' }));
   }
   if (key === 'bail') {
     const len = Math.min(g.drift, 2500);
@@ -504,24 +509,28 @@ function setDir(d) {
 
 function applyStepFilter() {
   const kinds = ['literal', STEPS[state.step].zones];
-  for (const id of ['sv-zone-fill', 'sv-zone-line', 'sv-zone-label']) state.map.setFilter(id, ['in', ['get', 'kind'], kinds]);
+  const m = state.map, inKinds = ['in', ['get', 'kind'], kinds];
+  m.setFilter('sv-zone-fill', ['all', ['==', ['geometry-type'], 'Polygon'], inKinds]);
+  m.setFilter('sv-zone-line', ['all', ['==', ['geometry-type'], 'Polygon'], inKinds]);
+  m.setFilter('sv-zone-label', ['all', ['==', ['geometry-type'], 'Point'], inKinds]);
 }
+
+const windCamU = (g) => clamp(g.shadow ? (g.shadow.end + g.rideU) / 2 : g.rideU - 150, g.rideU - 1200, g.rideU);
 
 function camera(key, g) {
   const L = g.launch, R = g.center, w = g.water;
   switch (key) {
     case 'wind': {
-      const u = clamp(g.shadow ? (g.shadow.end + g.rideU) / 2 : g.rideU - 150, g.rideU - 1200, g.rideU);
-      return { center: at(g, u, g.rideV), zoom: 14.7, pitch: 58, bearing: w };
+      return { center: at(g, windCamU(g), g.rideV), zoom: 14.7, pitch: 58, bearing: w };
     }
-    case 'launch': return { center: offset(L, w, 30), zoom: 17.3, pitch: 62, bearing: w };
-    case 'upwind': return { center: R, zoom: 15.1, pitch: 30, bearing: g.from };
-    case 'land': return { center: offset(L, w, 120), zoom: 16.2, pitch: 64, bearing: w };
+    case 'launch': return { center: offset(L, w, 60), zoom: 16.1, pitch: 62, bearing: w };
+    case 'upwind': return { center: at(g, g.rideU + 60, g.rideV), zoom: 14.9, pitch: 30, bearing: g.from };
+    case 'land': return { center: offset(L, w, 160), zoom: 15.5, pitch: 62, bearing: w };
     case 'bail': {
       const len = Math.min(g.drift, 2500);
       return { center: offset(R, g.to, len / 2), zoom: clamp(16.2 - Math.log2(Math.max(len, 150) / 150), 13.4, 16), pitch: 45, bearing: g.from };
     }
-    default: return { center: offset(L, w, 220), zoom: 15.6, pitch: 70, bearing: w };
+    default: return { center: R, zoom: 15.3, pitch: 62, bearing: w };
   }
 }
 
@@ -570,7 +579,7 @@ function buildPanel() {
     <details class="sv-more"><summary>All notes for this spot</summary><div class="sv-guide"></div></details>
     <div class="sv-orbit"><button data-r="-30">⟲ Turn left</button><button data-r="30">Turn right ⟳</button><button data-top="1">Top view</button></div>
     <div class="sv-legend"><span style="--c:#ffffff;outline:1px solid #aab"></span>Clean wind <span style="--c:#b48cff"></span>Gusty wind <span style="--c:#ff6d00"></span>Power zone <span style="--c:#ffd600"></span>Edge of window <span style="--c:#ff2d78"></span>Kite <span style="--c:#ffd400"></span>Rider <span style="--c:#2a9d55"></span>Launch <span style="--c:#e53935"></span>Keep clear <span style="--c:#1e88e5"></span>Riding area</div>
-    <div class="sv-note">Rider and kite are drawn about 3× real size.</div>`;
+    <div class="sv-note">Rider and kite are drawn about 7× real size so you can see them.</div>`;
   el.querySelector('b').textContent = opts.title;
   el.querySelector('.sv-exit').onclick = exitSpotView;
   const dir = el.querySelector('.sv-dir'), speed = el.querySelector('.sv-speed');
