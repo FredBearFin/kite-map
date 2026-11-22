@@ -15,6 +15,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: node tools/calibrate.mjs calibration.json
+        env:
+          WIND_GRID: "0.25"
       - uses: actions/upload-artifact@v4
         with:
           name: calibration

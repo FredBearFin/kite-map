@@ -48,9 +48,9 @@ const getDem = async (z, x, y) => {
   return PNG.sync.read(Buffer.from(await r.arrayBuffer())).data;
 };
 
-async function getWind(lat, lon) {
+async function getWind(lat, lon, grid = 1) {
   const year = new Date().getUTCFullYear() - 1;
-  const glat = Math.round(lat), glon = Math.round(lon);
+  const glat = grid ? Math.round(lat / grid) * grid : lat, glon = grid ? Math.round(lon / grid) * grid : lon;
   const url = `https://archive-api.open-meteo.com/v1/archive?latitude=${glat}&longitude=${glon}&start_date=${year}-01-01&end_date=${year}-12-31` +
     `&hourly=wind_speed_10m,wind_direction_10m,temperature_2m&wind_speed_unit=kn&timezone=auto&timeformat=unixtime`;
   for (let a = 0; a < 4; a++) {
@@ -71,6 +71,7 @@ const box = (lon, lat, km) => {
   return [lon - dLon, lat - dLat, lon + dLon, lat + dLat];
 };
 
+const GRID = +(process.env.WIND_GRID || 1);
 const results = [];
 for (const p of PLACES) {
   const t0 = Date.now();
@@ -79,10 +80,13 @@ for (const p of PLACES) {
   for (let km = p.coast ? 12 : 4; km <= 40; km *= 2) {
     const bbox = box(p.lon, p.lat, km);
     const inp = await gatherInputs(bbox, getTile, getDem, { maxTiles: 64 });
-    raw = analyzeSite({ ...inp, bbox, point: [p.lon, p.lat], radiusM: p.coast ? 3000 : 60000, maxFetch: 15000 });
+    raw = analyzeSite({ ...inp, bbox, point: [p.lon, p.lat], radiusM: p.coast ? 3000 : 60000, maxFetch: 15000, pickLargest: !p.coast });
     if (p.coast || !raw.ok || !raw.touchesEdge) break;
   }
-  const wind = await getWind(p.lat, p.lon);
+  const wind = await getWind(p.lat, p.lon, GRID);
+  const w1 = GRID === 1 ? wind : await getWind(p.lat, p.lon, 1);
+  const w0 = await getWind(p.lat, p.lon, 0);
+  console.log(`  wind kiteable h/yr: 1deg ${w1?.kiteHours}, ${GRID}deg ${wind?.kiteHours}, exact ${w0?.kiteHours}`);
   const s = scoreSite(raw, wind, 'water');
   const sb = scoreSite(raw, wind, 'beginner');
   results.push({ ...p, raw, wind, score: s.score, beginner: sb.score });

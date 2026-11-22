@@ -179,6 +179,19 @@ export function analyzeSite(input) {
         if (water[y * g.nx + x] && d < bd) { bd = d; best = y * g.nx + x; }
       }
     if (best >= 0) seeds = [best];
+    if (input.pickLargest && best >= 0) {
+      // The biggest water body within reach, not just the nearest pond.
+      let bigN = 0;
+      const tried = new Uint8Array(N);
+      for (let y = Math.max(0, py - R); y <= Math.min(g.ny - 1, py + R); y += 2)
+        for (let x = Math.max(0, px - R); x <= Math.min(g.nx - 1, px + R); x += 2) {
+          const i = y * g.nx + x;
+          if (!water[i] || tried[i]) continue;
+          const f = floodFill(g, water, [i]);
+          for (let k = 0; k < N; k++) if (f.comp[k]) tried[k] = 1;
+          if (f.size > bigN) { bigN = f.size; seeds = [i]; }
+        }
+    }
   }
   if (!seeds.length) return { ok: false, reason: 'no water found here' };
   const { comp, size, edge } = floodFill(g, water, seeds);
@@ -348,9 +361,14 @@ export function analyzeSite(input) {
 export const PARAMS = {
   // Wind angle to the shore: 0 = straight onshore, 90 = side-shore, 180 = offshore.
   angle: [[15, 0.7], [65, 1], [95, 0.9], [110, 0.4], [130, 0.1], [181, 0]],
-  cleanMin: 100, // m of clean wind over water below which it is too gusty
-  cleanFull: 1200, // m for steady wind
-  reachFull: 800, // m of water across the wind for comfortable reaches
+  // Clean wind over water: below cleanMin m it is too gusty to use; beyond
+  // that it gets steadier, about 63% of the way there after cleanScale m.
+  cleanMin: 100,
+  cleanScale: 1000,
+  cleanOpen: 3000, // what open sea or water past the edge of the map counts as
+  // Water to ride across the wind, same shape.
+  reachScale: 900,
+  river: 0.85, // current, barges, snags and sandbars
   accessNear: 300,
   accessFar: 800,
   accessFarF: 0.85,
@@ -372,12 +390,12 @@ export function rate(raw, P = PARAMS) {
     const qs = [];
     raw.cand.forEach((c, ci) => {
       const [th, W, open, sh, src, shH, reach] = c.dirs[d];
-      const clean = open ? Math.max(W, P.cleanFull) : W - sh;
+      const clean = open ? Math.max(W, P.cleanOpen) : W - sh;
       const fa = angleFactor(th, P);
-      const fc = Math.max(0, Math.min(1, (clean - P.cleanMin) / (P.cleanFull - P.cleanMin)));
-      const fr = Math.min(1, reach / P.reachFull);
+      const fc = clean <= P.cleanMin ? 0 : 1 - Math.exp(-(clean - P.cleanMin) / P.cleanScale);
+      const fr = 1 - Math.exp(-reach / P.reachScale);
       const fx = c.access == null ? 1 : c.access <= P.accessNear ? 1 : c.access <= P.accessFar ? P.accessFarF : P.accessNoneF;
-      const q = fa * fc * Math.sqrt(fr) * fx;
+      const q = fa * fc * Math.sqrt(fr) * fx * (c.river ? P.river : 1);
       qs.push({ ci, q, fa, fc, fr, fx, th, W, open, sh, src, shH, reach, clean });
     });
     qs.sort((a, b) => b.q - a.q);

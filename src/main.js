@@ -6,8 +6,9 @@ import { DIRS16, bboxIntersects, bboxOf } from './geo.js';
 import { lakesFromWater, bboxOverlap } from './osmwater.js';
 import { bestDirs, dayVerdict, estimateDriveHours, iceMonths } from './scoring.js';
 import { registerProtocol, glyphsTemplate, assetUrl, ASSETS, status, tileTemplate, initBasemap, prefetchWorld } from './tiles.js';
-import { HYDROLAKES_PAGE, HYDROLAKES_URL, lakeIndex, downloadWind, windCellKey, cellsFor, distanceFromHome, driveRoute, filterBbox, forecast, forecastMany, getWind, lakeCenter, loadCell, pointInLake, scoreFeatures } from './lakes.js';
-import { KNOWN_SPOTS } from './known-spots.js';
+import { HYDROLAKES_PAGE, HYDROLAKES_URL, lakeIndex, lakeSites, downloadWind, windCellKey, cellsFor, distanceFromHome, driveRoute, filterBbox, forecast, forecastMany, getWind, lakeCenter, loadCell, pointInLake, scoreFeatures } from './lakes.js';
+import { analyzeLake, analyzePoint, boxesIn, pickSpots, scanBox } from './siteapp.js';
+import { explain, launches, scoreSite, angleWord } from './spotscore.js';
 import { attachWaterColors } from './watercolor.js';
 import { downloadRegion, estimate, DEFAULTS } from './download.js';
 
@@ -111,18 +112,24 @@ map.once('style.load', () => {
   map.addLayer({ id: 'draw-line', type: 'line', source: 'draw', paint: { 'line-color': '#12658f', 'line-width': 2 } });
   map.addSource('saved', { type: 'geojson', data: fc([]) });
   map.addLayer({ id: 'saved-pt', type: 'circle', source: 'saved', paint: { 'circle-radius': 7, 'circle-color': '#7b2cbf', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } });
-  map.addSource('known', {
-    type: 'geojson',
-    data: fc(KNOWN_SPOTS.map((k, i) => ({ type: 'Feature', id: i, properties: { i, name: k.name }, geometry: { type: 'Point', coordinates: [k.lon, k.lat] } }))),
-  });
-  map.addLayer({ id: 'known-pt', type: 'circle', source: 'known', paint: { 'circle-radius': 6, 'circle-color': '#ff7a00', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } });
+  // Launch spots found by the shore analysis (lakes, coasts, bays, rivers).
+  map.addSource('spots', { type: 'geojson', data: fc([]) });
   map.addLayer({
-    id: 'known-label',
-    type: 'symbol',
-    source: 'known',
-    minzoom: 5,
-    layout: { 'text-field': ['get', 'name'], 'text-font': ['Noto Sans Medium'], 'text-size': 11, 'text-offset': [0, 1.2], 'text-anchor': 'top' },
-    paint: { 'text-color': '#8a4300', 'text-halo-color': '#fff', 'text-halo-width': 1.5 },
+    id: 'spot-pt', type: 'circle', source: 'spots', minzoom: 8,
+    paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 5, 13, 10], 'circle-color': SCORE_COLOR, 'circle-stroke-color': '#fff', 'circle-stroke-width': 1.5 },
+  });
+  map.addLayer({
+    id: 'spot-label', type: 'symbol', source: 'spots', minzoom: 10,
+    layout: { 'text-field': ['to-string', ['get', 'score']], 'text-font': ['Noto Sans Medium'], 'text-size': 10, 'text-allow-overlap': true },
+    paint: { 'text-color': '#1d2733' },
+  });
+  // Best launch points of the lake or spot that is open.
+  map.addSource('launch', { type: 'geojson', data: fc([]) });
+  map.addLayer({ id: 'launch-pt', type: 'circle', source: 'launch', paint: { 'circle-radius': 7, 'circle-color': '#2a9d55', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } });
+  map.addLayer({
+    id: 'launch-label', type: 'symbol', source: 'launch',
+    layout: { 'text-field': ['get', 'label'], 'text-font': ['Noto Sans Medium'], 'text-size': 11, 'text-offset': [0, 1.1], 'text-anchor': 'top' },
+    paint: { 'text-color': '#1c6b3a', 'text-halo-color': '#fff', 'text-halo-width': 1.5 },
   });
   map.addSource('home', { type: 'geojson', data: fc([]) });
   map.addLayer({ id: 'home-pt', type: 'circle', source: 'home', paint: { 'circle-radius': 6, 'circle-color': '#1d2733', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } });
@@ -160,7 +167,10 @@ async function init() {
   map.on('idle', () => {
     if (!needOsm) return;
     needOsm = false;
-    addOsmLakes().catch((e) => console.warn('osm lakes', e));
+    addOsmLakes()
+      .catch((e) => console.warn('osm lakes', e))
+      .then(() => analyzeLakesInView())
+      .then(() => scanView());
   });
   await loadRegions();
   renderHome();
@@ -273,6 +283,7 @@ async function addOsmLakes() {
 
 async function rescoreAll() {
   await scoreFeatures(state.lakes, state.mode);
+  refreshSpots();
   map.getSource('lakes')?.setData(fc(state.lakes));
   renderSpots();
 }
@@ -445,7 +456,7 @@ function roseSvg(wind, suit, size = 120) {
     const a0 = ((d * 22.5 - 10) * Math.PI) / 180;
     const a1 = ((d * 22.5 + 10) * Math.PI) / 180;
     const p = (a, rr) => `${(c + Math.sin(a) * rr).toFixed(1)},${(c - Math.cos(a) * rr).toFixed(1)}`;
-    const col = suit[d] >= 0.8 ? '#2a9d55' : suit[d] >= 0.5 ? '#e0a92e' : '#b8c3cf';
+    const col = suit[d] >= 0.6 ? '#2a9d55' : suit[d] >= 0.35 ? '#e0a92e' : '#b8c3cf';
     petals += `<path d="M${c},${c} L${p(a0, r)} A${r},${r} 0 0 1 ${p(a1, r)} Z" fill="${col}" stroke="#fff" stroke-width="0.5"/>`;
   }
   const lab = (t, x, y) => `<text x="${x}" y="${y}" font-size="10" text-anchor="middle" fill="#5b6b7c">${t}</text>`;
@@ -463,6 +474,14 @@ async function showLakePopup(f, lngLat) {
   const best = bestDirs(suit, wind, DIRS16);
   const maxFetch = Math.max(...p._fetch) / 1000;
   const d = distanceFromHome(f, state.home);
+  const site = lakeSites.get(p.id);
+  let whyHtml = '<p class="sub">Checking the shoreline (wind angle, open water, trees and buildings)...</p>';
+  let launchList = [];
+  if (site?.ok) {
+    const s = scoreSite(site, wind, state.mode, p);
+    whyHtml = reasonsHtml(explain(s, site, state.mode, p));
+    launchList = launches(s, site);
+  }
   const el = document.createElement('div');
   el.className = 'pop';
   el.innerHTML = `<h4></h4>
@@ -472,7 +491,8 @@ async function showLakePopup(f, lngLat) {
     <div class="rose">${roseSvg(wind, suit)}
       <div><div class="score" style="background:${scoreColor(p.score)};width:44px;height:44px;border-radius:22px;font-size:16px">${p.score}</div>
       <div class="sub" style="margin-top:4px">${scoreText(p)}</div></div></div>
-    <div class="sub">Petal length: kiteable daylight wind (12 to 35 kn) from that direction. Green: lake works well for that wind.</div>
+    <div class="sub">Petal length: kiteable daylight wind (12 to 35 kn) from that direction. Green: the lake works well for that wind.</div>
+    <h5>Why this score</h5><div class="whybox">${whyHtml}</div>
     <table>
       <tr><td>Area</td><td>${p.a.toFixed(2)} km² (${Math.round(p.a * 247.1)} acres)</td></tr>
       <tr><td>Longest open run</td><td>${fmtKm(maxFetch)} (${(maxFetch * 0.621).toFixed(1)} mi)</td></tr>
@@ -494,8 +514,22 @@ async function showLakePopup(f, lngLat) {
   };
   el.querySelector('.fcbtn').onclick = () => showForecast(el.querySelector('.fc'), lat, lon, suit);
   popup?.remove();
-  popup = new maplibregl.Popup({ maxWidth: '360px' }).setLngLat(lngLat).setDOMContent(el).addTo(map);
+  popup = new maplibregl.Popup({ maxWidth: '380px' }).setLngLat(lngLat).setDOMContent(el).addTo(map);
+  const mine = popup;
+  popup.on('close', () => showLaunches([]));
+  showLaunches(launchList);
   if (navigator.onLine) fillDrive(el, lon, lat);
+  if (!site) {
+    const raw = await analyzeLake(f).catch((e) => ({ ok: false, reason: String(e) }));
+    if (raw.ok) {
+      lakeSites.set(p.id, raw);
+      await scoreFeatures([f], state.mode);
+      map.getSource('lakes')?.setData(fc(state.lakes));
+      if (popup === mine && mine.isOpen()) showLakePopup(f, lngLat);
+    } else if (popup === mine) {
+      el.querySelector('.whybox').innerHTML = reasonsHtml(explain({}, raw));
+    }
+  }
 }
 
 const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -509,8 +543,6 @@ function scoreText(p) {
 
 function badges(p, wind) {
   const out = [];
-  const known = KNOWN_SPOTS.find((k) => pointInLakeSafe(p, k));
-  if (known) out.push(`<span class="badge good">Known kite spot</span>`);
   const sw = p.wrgb ? `<span style="display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:3px;background:rgb(${p.wrgb.join(',')})"></span>` : '';
   if (p.wc === 'clear') out.push(`<span class="badge good">${sw}Clear water</span>`);
   if (p.wc === 'green') out.push(`<span class="badge warn">${sw}Green water (algae likely)</span>`);
@@ -520,10 +552,6 @@ function badges(p, wind) {
   return out.join('');
 }
 
-function pointInLakeSafe(p, k) {
-  const f = state.byId.get(p.id);
-  return f ? pointInLake(f, k.lon, k.lat) : false;
-}
 
 async function showForecast(box, lat, lon, suit) {
   box.textContent = 'Loading forecast...';
@@ -586,7 +614,11 @@ function lakeAt(lon, lat, lakeId) {
 
 function forecastTargets() {
   const t = state.saved.map((s) => ({ name: s.name, lat: s.lat, lon: s.lon, lakeId: s.lakeId }));
-  if ($('fc-known').checked) for (const k of KNOWN_SPOTS) if (!t.some((x) => Math.abs(x.lat - k.lat) < 0.02 && Math.abs(x.lon - k.lon) < 0.02)) t.push({ name: k.name, lat: k.lat, lon: k.lon });
+  if ($('fc-known').checked) {
+    const vb = viewBbox();
+    const top = state.spots.filter((sp) => sp.c.lon >= vb[0] && sp.c.lon <= vb[2] && sp.c.lat >= vb[1] && sp.c.lat <= vb[3]).slice(0, 6);
+    for (const sp of top) t.push({ name: `Spot ${sp.c.lat.toFixed(3)}, ${sp.c.lon.toFixed(3)} (${sp.score})`, lat: sp.c.lat, lon: sp.c.lon, suit: scoreSite(sp.raw, windAt(sp.c.lat, sp.c.lon), state.mode).Q });
+  }
   return t;
 }
 
@@ -612,7 +644,7 @@ function renderForecast() {
   $('fc-status').textContent = `Updated ${new Date(data.fetched).toLocaleString()}${age > 12 ? ' (old, check again when online)' : ''}. Drive times are estimates from ${state.home.name}.`;
   const rows = data.targets.map((t, i) => {
     const lake = lakeAt(t.lon, t.lat, t.lakeId);
-    const days = groupDays(data.results[i], lake ? lake.properties._suit : null);
+    const days = groupDays(data.results[i], t.suit || (lake ? lake.properties._suit : null));
     return { t, lake, days, drive: estimateDriveHours(distanceFromHome({ properties: { _c: [t.lon, t.lat] } }, state.home)) };
   });
   rows.sort((a, b) => countGo(b.days) - countGo(a.days) || a.drive - b.drive);
@@ -642,32 +674,140 @@ function renderForecast() {
 
 const countGo = (days) => [...days.values()].filter((v) => v.verdict === 'go').length;
 
-// ---------- Reference spots ----------
+// ---------- Discovered launch spots ----------
 
-map.on('click', 'known-pt', (e) => {
-  const k = KNOWN_SPOTS[e.features[0].properties.i];
-  const lake = lakeAt(k.lon, k.lat);
-  if (lake) return showLakePopup(lake, [k.lon, k.lat]);
+state.spots = [];
+const boxRaws = new Map();
+const windCache = new Map();
+
+async function preloadWind(points) {
+  for (const [lat, lon] of points) {
+    const k = windCellKey(lat, lon);
+    if (!windCache.has(k)) windCache.set(k, await getWind(lat, lon));
+  }
+}
+const windAt = (lat, lon) => windCache.get(windCellKey(lat, lon)) || null;
+
+async function refreshSpots() {
+  const raws = [...boxRaws.values()];
+  const pts = new Set();
+  for (const r of raws) for (const c of r?.cand || []) pts.add(windCellKey(c.lat, c.lon));
+  await preloadWind([...pts].map((k) => k.split(',').map(Number)));
+  state.spots = pickSpots(raws, windAt, state.mode);
+  map.getSource('spots')?.setData(fc(state.spots.map((s, i) => ({ type: 'Feature', id: i, properties: { i, score: s.score }, geometry: { type: 'Point', coordinates: [s.c.lon, s.c.lat] } }))));
+  if ($('f-view').checked) renderSpots();
+}
+
+let scanBusy = false;
+let scanGen = 0;
+/** Scan the shores in view for launch spots, nearest the centre first. */
+async function scanView() {
+  if (map.getZoom() < 10) return;
+  const gen = ++scanGen;
+  if (scanBusy) return;
+  scanBusy = true;
+  try {
+    let boxes = boxesIn(viewBbox()).filter((b) => !boxRaws.has(b.key));
+    const c = map.getCenter();
+    boxes.sort((a, b) => Math.hypot((a.bbox[0] + a.bbox[2]) / 2 - c.lng, (a.bbox[1] + a.bbox[3]) / 2 - c.lat) - Math.hypot((b.bbox[0] + b.bbox[2]) / 2 - c.lng, (b.bbox[1] + b.bbox[3]) / 2 - c.lat));
+    boxes = boxes.slice(0, 40);
+    for (let k = 0; k < boxes.length; k++) {
+      if (gen !== scanGen && k > 0) break; // the view moved; start over there
+      setBanner(`Checking shorelines for launch spots: ${k + 1} of ${boxes.length} areas...`);
+      try {
+        const raw = await scanBox(boxes[k]);
+        if (raw) boxRaws.set(boxes[k].key, raw);
+      } catch (e) {
+        console.warn('scan', e);
+      }
+      if (k % 4 === 3) await refreshSpots();
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    await refreshSpots();
+  } finally {
+    scanBusy = false;
+    setBanner(null);
+  }
+  if (gen !== scanGen) scanView();
+}
+
+/** Shore analysis for the best-looking lakes in view, a few at a time. */
+let lakeBusy = false;
+async function analyzeLakesInView() {
+  if (lakeBusy || map.getZoom() < 9) return;
+  lakeBusy = true;
+  try {
+    const vb = viewBbox();
+    const todo = state.lakes
+      .filter((f) => !lakeSites.has(f.properties.id) && bboxIntersects(f.properties._bbox, vb))
+      .sort((a, b) => b.properties.score - a.properties.score)
+      .slice(0, 12);
+    for (const f of todo) {
+      const raw = await analyzeLake(f).catch(() => null);
+      if (raw?.ok) lakeSites.set(f.properties.id, raw);
+    }
+    if (todo.length) {
+      await scoreFeatures(todo, state.mode);
+      map.getSource('lakes')?.setData(fc(state.lakes));
+      renderSpots();
+    }
+  } finally {
+    lakeBusy = false;
+  }
+}
+
+function showLaunches(list) {
+  map.getSource('launch')?.setData(fc(list.map((l) => ({ type: 'Feature', properties: { label: l.dirs.slice(0, 3).join(' ') + ' wind' }, geometry: { type: 'Point', coordinates: [l.lon, l.lat] } }))));
+}
+
+function reasonsHtml(rs) {
+  const icon = { good: '✔', bad: '✘', warn: '⚠', info: 'ℹ' };
+  return `<ul class="why">${rs.map((r) => `<li class="why-${r.kind}"><span>${icon[r.kind]}</span> ${esc(r.text)}</li>`).join('')}</ul>`;
+}
+
+/** Popup for a shore spot (a discovered launch or any point you check). */
+async function showSpotPopup(raw, lon, lat, title) {
+  const c0 = raw?.cand?.[0];
+  await preloadWind([[lat, lon]]);
+  const wind = windAt(lat, lon);
+  const s = scoreSite(raw, wind, state.mode);
+  const d = distanceFromHome({ properties: { _c: [lon, lat] } }, state.home);
   const el = document.createElement('div');
   el.className = 'pop';
-  const d = distanceFromHome({ properties: { _c: [k.lon, k.lat] } }, state.home);
-  el.innerHTML = `<h4></h4><div class="sub"></div><p></p><div class="sub drive">~${fmtH(estimateDriveHours(d))} drive from ${esc(state.home.name)}</div>
-    <p class="sub">Download this area in the Regions tab to see its lake score and wind.</p>
-    <div class="actions"><button class="save">Save spot</button><button class="fcbtn">7-day forecast</button></div><div class="fc"></div>`;
-  el.querySelector('h4').textContent = k.name;
-  el.querySelector('.sub').textContent = k.region + (k.school ? ' · School: ' + k.school : '');
-  el.querySelector('p').textContent = k.note;
-  el.querySelector('.save').onclick = () => saveSpot(k.lat, k.lon, k.name);
-  el.querySelector('.fcbtn').onclick = () => showForecast(el.querySelector('.fc'), k.lat, k.lon, null);
+  el.innerHTML = `<h4></h4>
+    <div class="sub">${raw?.ok ? `${raw.cand.length > 1 ? raw.cand.length + ' launch points checked' : 'Shore facing ' + c0.face}${c0?.river ? ' · river' : ''}` : ''}</div>
+    <div class="sub drive">~${fmtH(estimateDriveHours(d))} drive (${fmtMi(d)} straight line) from ${esc(state.home.name)}</div>
+    <div class="rose">${roseSvg(wind, s.Q)}
+      <div><div class="score" style="background:${scoreColor(s.score)};width:44px;height:44px;border-radius:22px;font-size:16px">${s.score}</div>
+      <div class="sub" style="margin-top:4px">${scoreText({ basis: s.basis === 'site' ? 'wind' : s.basis, eff: s.eff })}</div></div></div>
+    <div class="sub">Petals: how often the wind blows from there. Green: works well from this shore.</div>
+    <h5>Why this score</h5>${reasonsHtml(explain(s, raw, state.mode))}
+    ${monthSvg(wind)}
+    <div class="actions"><button class="save">Save spot</button><button class="fcbtn">7-day forecast</button><button class="gmap">Copy coordinates</button></div>
+    <div class="fc"></div>`;
+  el.querySelector('h4').textContent = title;
+  el.querySelector('.save').onclick = () => saveSpot(lat, lon, title === 'Launch spot' ? `Spot ${lat.toFixed(3)}, ${lon.toFixed(3)}` : title);
+  el.querySelector('.gmap').onclick = () => {
+    navigator.clipboard?.writeText(`${lat.toFixed(5)}, ${lon.toFixed(5)}`);
+    toast('Coordinates copied');
+  };
+  el.querySelector('.fcbtn').onclick = () => showForecast(el.querySelector('.fc'), lat, lon, s.Q);
   popup?.remove();
-  popup = new maplibregl.Popup({ maxWidth: '340px' }).setLngLat([k.lon, k.lat]).setDOMContent(el).addTo(map);
-  if (navigator.onLine) fillDrive(el, k.lon, k.lat);
+  popup = new maplibregl.Popup({ maxWidth: '380px' }).setLngLat([lon, lat]).setDOMContent(el).addTo(map);
+  popup.on('close', () => showLaunches([]));
+  showLaunches(launches(s, raw));
+  if (navigator.onLine) fillDrive(el, lon, lat);
+}
+
+map.on('click', 'spot-pt', (e) => {
+  const sp = state.spots[e.features[0].properties.i];
+  if (sp) showSpotPopup(sp.raw, sp.c.lon, sp.c.lat, 'Launch spot');
 });
-map.on('mouseenter', 'known-pt', () => (map.getCanvas().style.cursor = 'pointer'));
-map.on('mouseleave', 'known-pt', () => (map.getCanvas().style.cursor = ''));
+map.on('mouseenter', 'spot-pt', () => (map.getCanvas().style.cursor = 'pointer'));
+map.on('mouseleave', 'spot-pt', () => (map.getCanvas().style.cursor = ''));
 
 map.on('click', 'lake-fill', (e) => {
-  if (map.queryRenderedFeatures(e.point, { layers: ['known-pt'] }).length) return;
+  if (map.queryRenderedFeatures(e.point, { layers: ['spot-pt', 'launch-pt'] }).length) return;
   if (state.drawing) return;
   const f = state.byId.get(e.features[0].properties.id);
   if (f) showLakePopup(f, e.lngLat);
@@ -703,6 +843,16 @@ map.on('contextmenu', (e) => {
   add('Save a spot here', () => {
     const name = prompt('Name for this spot', 'My spot');
     if (name) saveSpot(lat, lng, name);
+  });
+  add('Rate this shore as a kite launch', async () => {
+    toast('Checking the shoreline here...', 2500);
+    try {
+      const raw = await analyzePoint(lng, lat);
+      if (!raw.ok) return toast('No shoreline found near here.');
+      showSpotPopup(raw, lng, lat, 'Shore near here');
+    } catch (err) {
+      toast('Could not check this spot: ' + err);
+    }
   });
   add('Start trips from here', async () => {
     const name = prompt('Name for this starting point (home, hotel, ...)', 'Home');
@@ -814,7 +964,7 @@ function renderSaved() {
 
 $('l-lakes').onchange = (e) => ['lake-fill', 'lake-line', 'lake-score'].forEach((id) => map.setLayoutProperty(id, 'visibility', e.target.checked ? 'visible' : 'none'));
 $('l-hill').onchange = (e) => map.setLayoutProperty('hillshade', 'visibility', e.target.checked ? 'visible' : 'none');
-$('l-known').onchange = (e) => ['known-pt', 'known-label'].forEach((id) => map.setLayoutProperty(id, 'visibility', e.target.checked ? 'visible' : 'none'));
+$('l-known').onchange = (e) => ['spot-pt', 'spot-label'].forEach((id) => map.setLayoutProperty(id, 'visibility', e.target.checked ? 'visible' : 'none'));
 $('l-sat').onchange = (e) => map.setLayoutProperty('satellite', 'visibility', e.target.checked ? 'visible' : 'none');
 $('l-geo').onchange = (e) => map.setLayoutProperty('geology', 'visibility', e.target.checked ? 'visible' : 'none');
 

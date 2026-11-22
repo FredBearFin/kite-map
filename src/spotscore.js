@@ -9,7 +9,7 @@ import { iceMonths, shallowFactor, waterFactor } from './scoring.js';
 export const SNOW_PARAMS = { ...PARAMS, angle: [[181, 1]] };
 
 // Effective hours at which the score reaches about 63 (1 - 1/e).
-export const SCALE = { water: 250, beginner: 160, snow: 120 };
+export const SCALE = { water: 370, beginner: 240, snow: 150 };
 
 const toScore = (eff, scale) => Math.round(100 * (1 - Math.exp(-eff / scale)));
 

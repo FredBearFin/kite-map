@@ -3,6 +3,7 @@
 import { backend } from './backend.js';
 import { bboxOf, bboxIntersects, haversineKm } from './geo.js';
 import { lakeShape, scoreLake, windStats, WIND_VERSION } from './scoring.js';
+import { scoreSite } from './spotscore.js';
 
 // The lake database is built on this computer from the HydroLAKES zip
 // (see the Regions tab), and stored under lakes/<cell> and lakes/index.json.
@@ -167,6 +168,10 @@ export function lakeCenter(f) {
   return p._c;
 }
 
+// Shore analyses of lakes (site.js), by lake id. Lakes with one are scored
+// from it; the others get the quick shape-only estimate.
+export const lakeSites = new Map();
+
 export async function scoreFeatures(features, mode = 'water') {
   let n = 0;
   for (const f of features) {
@@ -175,8 +180,15 @@ export async function scoreFeatures(features, mode = 'water') {
     const [lon, lat] = lakeCenter(f);
     const fetch8 = lakeShape(f);
     const wind = await getWind(lat, lon);
+    const site = lakeSites.get(f.properties.id);
+    if (site?.ok) {
+      const s = scoreSite(site, wind, mode, f.properties);
+      Object.assign(f.properties, { score: s.score, eff: s.eff, basis: s.basis, detail: 1 });
+      f.properties._suit = s.Q;
+      continue;
+    }
     const s = scoreLake(fetch8, wind, mode, f.properties);
-    Object.assign(f.properties, { score: s.score, eff: s.effHours, basis: s.basis });
+    Object.assign(f.properties, { score: s.score, eff: s.effHours, basis: s.basis, detail: 0 });
     f.properties._suit = s.suit;
   }
 }

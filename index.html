@@ -53,7 +53,7 @@
         </section>
         <section id="tab-forecast" class="tab">
           <p class="hint">Next 7 days for your saved spots. <b>Go</b>: 3 or more daylight hours of 12 to 35 kn from a direction that works on that lake. <b>Maybe</b>: some kiteable wind, but short or from a poor direction.</p>
-          <label class="check"><input id="fc-known" type="checkbox" checked /> Include reference spots</label>
+          <label class="check"><input id="fc-known" type="checkbox" checked /> Include the best launch spots found in view</label>
           <div class="row"><button id="fc-refresh" class="primary">Check forecast</button></div>
           <p id="fc-status" class="hint"></p>
           <div id="fc-table"></div>
@@ -111,12 +111,19 @@
         </section>
         <section id="tab-layers" class="tab">
           <label class="check"><input id="l-lakes" type="checkbox" checked /> Lake kite scores</label>
-          <label class="check"><input id="l-known" type="checkbox" checked /> Reference kite spots and schools</label>
+          <label class="check"><input id="l-known" type="checkbox" checked /> Launch spots found on any shore (coast, bay, river, lake)</label>
           <label class="check"><input id="l-sat" type="checkbox" /> Satellite imagery (check beaches and weed beds)</label>
           <label class="check"><input id="l-hill" type="checkbox" checked /> Terrain shading</label>
           <label class="check"><input id="l-geo" type="checkbox" /> Geology (Macrostrat)</label>
           <h3>How spots are scored</h3>
-          <p class="hint">Each lake gets 0 to 100. For each of 16 wind directions it checks the longest clear run of water along the wind (1.5 km or more is ideal) and the width across it (800 m or more). Those are weighted by how many daylight hours per year the wind blows 12 to 35 knots from that direction, using last year's hourly ERA5 weather data. Lakes whose water looks green or murky on summer satellite imagery, or that are very shallow on average (likely weedy or mucky), score lower.</p>
+          <p class="hint">Every shore in view is checked, whether it's a lake, a coast, a bay or a wide river. Nothing is hand-picked. For each stretch of shore and each of 16 wind directions it looks at:</p>
+          <ul class="hint">
+            <li><b>Wind angle to the shore.</b> Side-onshore is best and side-shore is good. Straight onshore is safe but hard to get out. Offshore blows you away from land, so it scores near zero.</li>
+            <li><b>Clean wind.</b> This is how far the wind crosses open water before the launch, minus the gusty shadow behind trees, buildings and bluffs on the upwind shore (about 10 times their height, or 6 times for hills).</li>
+            <li><b>Room to ride</b> back and forth across the wind.</li>
+            <li><b>Road access</b> to the launch, plus bridges nearby. River banks are marked, because of current, barges and sandbars.</li>
+          </ul>
+          <p class="hint">Each direction's rating is multiplied by how many daylight hours a year the wind blows 12 to 35 knots from there (from last year's hourly ERA5 weather). That total gives a score from 0 to 100. Click a lake or a dot to see why it got its score and where to launch. Green or murky water on satellite, and very shallow lakes, score lower.</p>
           <div class="legend"><span style="--c:#9fb3c8"></span>0<span style="--c:#f2c14e"></span>40<span style="--c:#f78154"></span>70<span style="--c:#d7263d"></span>90+</div>
           <h3>Data</h3>
           <p class="hint">Map © OpenStreetMap contributors, Protomaps. Lakes: HydroLAKES (Messager et al. 2016), CC BY 4.0. Wind: Open-Meteo, ERA5 (Copernicus), CC BY 4.0. Terrain: Mapzen / AWS Terrain Tiles. Geology: Macrostrat, CC BY 4.0. Satellite: Sentinel-2 cloudless 2024 by EOX IT Services GmbH (contains modified Copernicus Sentinel data 2024), free for non-commercial use. Road times: OSRM.</p>

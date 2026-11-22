@@ -80,3 +80,12 @@ progress { width: 100%; }
 .box { border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; margin-bottom: 12px; background: var(--bg); }
 .box code { font-size: 11px; }
 .banner { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 5; background: #1d2733; color: #fff; padding: 8px 14px; border-radius: 6px; font-size: 13px; max-width: 70%; box-shadow: 0 2px 10px rgba(0,0,0,.2); }
+
+.pop h5 { margin: 8px 0 2px; font-size: 12px; }
+ul.why { list-style: none; margin: 0; padding: 0; font-size: 12px; }
+ul.why li { display: flex; gap: 6px; padding: 2px 0; line-height: 1.35; }
+ul.why li span { flex: none; width: 12px; text-align: center; }
+.why-good span { color: #2a9d55; }
+.why-bad span { color: #c0392b; }
+.why-warn span { color: #c27c0e; }
+.why-info span { color: #5b6b7c; }
