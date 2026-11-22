@@ -83,7 +83,12 @@ async function snap3d(page, path) {
 
   // Forecast tab: opening it fetches the forecast for the spots in view.
   await page.evaluate(() => document.querySelector('#tabs button[data-tab="forecast"]').click());
-  await page.waitForSelector('#fc-table table', { timeout: 120000 }).catch(() => console.log('forecast did not load'));
+  for (let k = 0; k < 3; k++) {
+    const ok = await page.waitForSelector('#fc-table table', { timeout: 90000 }).then(() => true).catch(() => false);
+    if (ok) break;
+    console.log('forecast did not load:', await page.evaluate(() => document.getElementById('fc-status').textContent));
+    await page.evaluate(() => document.getElementById('fc-refresh').click());
+  }
   await page.waitForTimeout(2000);
   await page.screenshot({ path: `${out}/4-forecast.png` });
   // Colour the map for the day with the most "go" spots.
@@ -96,6 +101,24 @@ async function snap3d(page, path) {
   });
   await page.waitForTimeout(4000);
   await page.screenshot({ path: `${out}/5-forecast-map-day.png` });
+
+  // A lake lined with houses, where access matters: the spots get amber or
+  // red rings and lower scores where the shore is private.
+  await page.evaluate(() => { document.querySelector('#tabs button[data-tab="spots"]').click(); window.__kite.state.fcDay = null; window.__kite.map.jumpTo({ center: [-95.16, 43.37], zoom: 12.2 }); });
+  await page.waitForTimeout(5000);
+  await page.waitForFunction(() => document.getElementById('banner').hidden, null, { timeout: 240000, polling: 2000 }).catch(() => {});
+  await page.waitForTimeout(25000);
+  console.log('okoboji access', await page.evaluate(() => window.__kite.state.spots.slice(0, 12).map((s) => `${s.score}/${s.base} ${s.access?.level}`)));
+  await page.screenshot({ path: `${out}/6-access-map.png` });
+  const lim = await page.evaluate(() => window.__kite.state.spots.findIndex((s) => s.access && s.access.level !== 'public'));
+  if (lim >= 0) {
+    await page.evaluate((i) => window.__kite.spotPopup(i), lim);
+    await page.waitForSelector('.pop .access .why', { timeout: 90000 }).catch(() => {});
+    await page.waitForTimeout(1500);
+    await page.evaluate(() => document.querySelector('.pop .access')?.previousElementSibling?.scrollIntoView({ block: 'start' }));
+    await page.waitForTimeout(800);
+    await page.screenshot({ path: `${out}/7-access-limited-popup.png` });
+  }
   if (!process.env.FULL_3D) { await browser.close(); return; }
 
   await page.evaluate(() => window.__kite.spotView(0));

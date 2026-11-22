@@ -640,7 +640,7 @@ async function checkForecast() {
     await backend.kvSet('forecast/last', state.fcData);
     renderForecast();
   } catch (e) {
-    $('fc-status').textContent = 'The forecast needs an internet connection.' + (state.fcData ? ' Showing the last one.' : '');
+    $('fc-status').textContent = (navigator.onLine ? 'Could not reach the forecast service. Try again in a minute.' : 'The forecast needs an internet connection.') + (state.fcData ? ' Showing the last one.' : '');
   }
 }
 $('fc-refresh').onclick = checkForecast;

@@ -138,7 +138,12 @@ export async function forecastMany(points) {
       `https://api.open-meteo.com/v1/forecast?latitude=${part.map((p) => p[0].toFixed(3)).join(',')}` +
       `&longitude=${part.map((p) => p[1].toFixed(3)).join(',')}` +
       `&hourly=wind_speed_10m,wind_gusts_10m,wind_direction_10m,temperature_2m&wind_speed_unit=kn&timezone=auto&forecast_days=7`;
-    const r = await backend.httpJson(url, { refresh: true });
+    // The forecast service sometimes times out: try a few times.
+    let r, err;
+    for (let k = 0; k < 3 && !r; k++) {
+      try { r = await backend.httpJson(url, { refresh: true }); } catch (e) { err = e; await sleep(3000 * (k + 1)); }
+    }
+    if (!r) throw err;
     out.push(...(Array.isArray(r) ? r : [r]));
   }
   return out;
