@@ -7,6 +7,10 @@ on:
 jobs:
   calibrate:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        source: [era5, hires]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -16,8 +20,9 @@ jobs:
       - run: npm ci
       - run: node tools/calibrate.mjs calibration.json
         env:
-          WIND_GRID: "0.25"
+          WIND_GRID: ${{ matrix.source == 'hires' && '0' || '0.25' }}
+          WIND_SOURCE: ${{ matrix.source }}
       - uses: actions/upload-artifact@v4
         with:
-          name: calibration
+          name: calibration-${{ matrix.source }}
           path: calibration.json

@@ -15,6 +15,7 @@ import { scoreSite, explain } from '../src/spotscore.js';
 
 // expect: 'good' = established kite spot, 'poor' = not a kite spot.
 const PLACES = [
+  // Lakes
   { name: 'West Okoboji Lake, IA', lat: 43.375, lon: -95.155, expect: 'good' },
   { name: 'Big Spirit Lake, IA', lat: 43.47, lon: -95.1, expect: 'good' },
   { name: 'Branched Oak Lake, NE', lat: 40.97, lon: -96.86, expect: 'good' },
@@ -23,13 +24,33 @@ const PLACES = [
   { name: 'White Bear Lake, MN', lat: 45.08, lon: -92.985, expect: 'good' },
   { name: 'Bde Maka Ska, MN', lat: 44.948, lon: -93.311, expect: 'good' },
   { name: 'Lake Mendota, WI', lat: 43.105, lon: -89.42, expect: 'good' },
+  { name: 'Lake Winnebago, WI', lat: 44.0, lon: -88.42, expect: 'good' },
+  { name: 'Mille Lacs Lake, MN', lat: 46.23, lon: -93.65, expect: 'good' },
+  { name: 'Cherry Creek Reservoir, CO', lat: 39.64, lon: -104.855, expect: 'good' },
+  { name: 'Lake Garda (Torbole), IT', lat: 45.87, lon: 10.875, expect: 'good', coast: true },
+  // Coasts, bays and rivers
   { name: 'Lake Pepin (Mississippi), MN', lat: 44.5, lon: -92.29, expect: 'good' },
   { name: 'Laguna Madre flats, TX', lat: 26.13, lon: -97.18, expect: 'good', coast: true },
   { name: 'Bird Island Basin, TX', lat: 27.475, lon: -97.31, expect: 'good', coast: true },
   { name: 'Hood River (Columbia), OR', lat: 45.715, lon: -121.52, expect: 'good', coast: true },
+  { name: 'Sherman Island, CA', lat: 38.04, lon: -121.79, expect: 'good', coast: true },
+  { name: 'Crissy Field, CA', lat: 37.806, lon: -122.465, expect: 'good', coast: true },
+  { name: 'Cape Hatteras (Pamlico Sound), NC', lat: 35.3, lon: -75.52, expect: 'good', coast: true },
+  { name: 'Tarifa, ES', lat: 36.03, lon: -5.63, expect: 'good', coast: true },
+  { name: 'Kailua Beach, HI', lat: 21.4, lon: -157.73, expect: 'good', coast: true },
+  { name: 'Jensen Beach Causeway, FL', lat: 27.21, lon: -80.21, expect: 'good', coast: true },
+  // Not kite spots: small, narrow, wooded, urban or busy water.
   { name: 'Lake of the Isles, MN', lat: 44.956, lon: -93.308, expect: 'poor' },
   { name: 'Lake Cunningham, NE', lat: 41.34, lon: -96.06, expect: 'poor' },
+  { name: 'Zorinsky Lake, NE', lat: 41.24, lon: -96.18, expect: 'poor' },
+  { name: 'Walden Pond, MA', lat: 42.44, lon: -71.337, expect: 'poor' },
+  { name: 'Central Park Reservoir, NY', lat: 40.785, lon: -73.962, expect: 'poor' },
+  { name: 'Lake of the Ozarks (Osage arm), MO', lat: 38.17, lon: -92.75, expect: 'poor' },
+  { name: 'Table Rock Lake, MO', lat: 36.6, lon: -93.4, expect: 'poor' },
+  { name: 'Lake Lanier, GA', lat: 34.2, lon: -83.95, expect: 'poor' },
+  { name: 'Smith Mountain Lake, VA', lat: 37.08, lon: -79.6, expect: 'poor' },
   { name: 'Missouri River at Omaha, NE', lat: 41.27, lon: -95.925, expect: 'poor', coast: true },
+  { name: 'Mississippi River at St. Louis, MO', lat: 38.63, lon: -90.18, expect: 'poor', coast: true },
 ];
 
 const builds = await (await fetch('https://build-metadata.protomaps.dev/builds.json')).json();
@@ -47,14 +68,20 @@ const getDem = async (z, x, y) => {
   return PNG.sync.read(Buffer.from(await r.arrayBuffer())).data;
 };
 
+// WIND_SOURCE=era5 (reanalysis, about 30 km cells) or hires (archived
+// forecasts from the best local weather model, a few km: catches sea breezes,
+// lake breezes and valley winds that ERA5 smooths away).
+const SOURCE = process.env.WIND_SOURCE || 'era5';
 async function getWind(lat, lon, grid = 1) {
   const year = new Date().getUTCFullYear() - 1;
   const glat = grid ? Math.round(lat / grid) * grid : lat, glon = grid ? Math.round(lon / grid) * grid : lon;
-  const url = `https://archive-api.open-meteo.com/v1/archive?latitude=${glat}&longitude=${glon}&start_date=${year}-01-01&end_date=${year}-12-31` +
+  const host = SOURCE === 'hires' ? 'https://historical-forecast-api.open-meteo.com/v1/forecast' : 'https://archive-api.open-meteo.com/v1/archive';
+  const url = `${host}?latitude=${glat.toFixed(4)}&longitude=${glon.toFixed(4)}&start_date=${year}-01-01&end_date=${year}-12-31` +
     `&hourly=wind_speed_10m,wind_direction_10m,temperature_2m&wind_speed_unit=kn&timezone=auto&timeformat=unixtime`;
   for (let a = 0; a < 4; a++) {
     // A network hiccup throws instead of returning an error status: retry it too.
     const r = await fetch(url).catch((e) => ({ ok: false, err: e }));
+    if (!r.ok && r.status) console.log('  wind', r.status, (await r.text()).slice(0, 200));
     if (r.ok) {
       const j = await r.json();
       const off = j.utc_offset_seconds || 0;
@@ -84,9 +111,7 @@ for (const p of PLACES) {
     if (p.coast || !raw.ok || !raw.touchesEdge) break;
   }
   const wind = await getWind(p.lat, p.lon, GRID);
-  const w1 = GRID === 1 ? wind : await getWind(p.lat, p.lon, 1);
-  const w0 = await getWind(p.lat, p.lon, 0);
-  console.log(`  wind kiteable h/yr: 1deg ${w1?.kiteHours}, ${GRID}deg ${wind?.kiteHours}, exact ${w0?.kiteHours}`);
+  console.log(`  ${SOURCE} wind kiteable h/yr: ${wind?.kiteHours}`);
   const s = scoreSite(raw, wind, 'water');
   const sb = scoreSite(raw, wind, 'beginner');
   results.push({ ...p, raw, wind, score: s.score, beginner: sb.score });
@@ -94,6 +119,14 @@ for (const p of PLACES) {
   for (const r of explain(s, raw)) console.log(`  ${r.kind.padEnd(4)} ${r.text}`);
 }
 
+// Accuracy: how often a real kite spot outscores a non-spot (1 = always), and
+// how many places land on the right side of 50.
+const good = results.filter((r) => r.expect === 'good'), poor = results.filter((r) => r.expect === 'poor');
+let wins = 0;
+for (const g of good) for (const b of poor) wins += g.score > b.score ? 1 : g.score === b.score ? 0.5 : 0;
+const ranking = wins / (good.length * poor.length);
+const right = results.filter((r) => (r.expect === 'good') === (r.score >= 50)).length;
+console.log(`\nACCURACY ${SOURCE}: ranking ${(100 * ranking).toFixed(1)}% (a real spot beats a non-spot), ${right} of ${results.length} on the right side of 50`);
 console.log('\nSummary');
 for (const r of [...results].sort((a, b) => b.score - a.score)) console.log(`${String(r.score).padStart(3)} ${String(r.beginner).padStart(3)}  ${r.expect.padEnd(4)}  ${r.name}`);
 if (process.argv[2]) fs.writeFileSync(process.argv[2], JSON.stringify(results));
