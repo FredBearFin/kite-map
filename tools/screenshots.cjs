@@ -27,7 +27,7 @@ async function waitIdle(page, ms = 240000) {
   fs.mkdirSync(out, { recursive: true });
   const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2 });
-  page.on('console', (m) => m.type() === 'error' && console.log('console:', m.text().slice(0, 200)));
+  page.on('console', (m) => ['error', 'warning'].includes(m.type()) && console.log('console:', m.text().slice(0, 200)));
   page.on('pageerror', (e) => console.log('pageerror:', String(e).slice(0, 300)));
   await page.goto('http://localhost:4173');
   await page.waitForFunction(() => window.__kite?.map?.isStyleLoaded(), null, { timeout: 60000 });
@@ -54,5 +54,17 @@ async function waitIdle(page, ms = 240000) {
   await page.evaluate(() => document.querySelectorAll('#sv-panel .sv-dirs button')[1]?.click());
   await waitIdle(page);
   await page.screenshot({ path: `${out}/4-spot-3d-other-wind.png` });
+  // Diagnostics for the 3D view: turn layers off one group at a time.
+  const steps = [
+    ['d1-no-extrusions', () => ['sv-trees', 'sv-buildings'].forEach((id) => window.__kite.map.setLayoutProperty(id, 'visibility', 'none'))],
+    ['d2-no-satellite', () => window.__kite.map.setLayoutProperty('satellite', 'visibility', 'none')],
+    ['d3-no-terrain', () => window.__kite.map.setTerrain(null)],
+  ];
+  for (const [name, fn] of steps) {
+    await page.evaluate(fn);
+    await waitIdle(page, 60000);
+    console.log(name, await page.evaluate(() => { const m = window.__kite.map; return JSON.stringify({ terrain: !!m.getTerrain(), pitch: m.getPitch(), zoom: m.getZoom(), layers: m.getStyle().layers.length }); }));
+    await page.screenshot({ path: `${out}/${name}.png` });
+  }
   await browser.close();
 })();
