@@ -9,6 +9,7 @@ import { registerProtocol, glyphsTemplate, assetUrl, ASSETS, status, tileTemplat
 import { HYDROLAKES_PAGE, HYDROLAKES_URL, lakeIndex, lakeSites, downloadWind, windCellKey, cellsFor, distanceFromHome, driveRoute, filterBbox, forecast, forecastMany, getWind, lakeCenter, loadCell, pointInLake, scoreFeatures } from './lakes.js';
 import { analyzeLake, analyzePoint, boxesIn, pickSpots, scanBox } from './siteapp.js';
 import { explain, launches, scoreSite, angleWord } from './spotscore.js';
+import { enterSpotView } from './spotview.js';
 import { attachWaterColors } from './watercolor.js';
 import { downloadRegion, estimate, DEFAULTS } from './download.js';
 
@@ -499,8 +500,10 @@ async function showLakePopup(f, lngLat) {
   const site = lakeSites.get(p.id);
   let whyHtml = '<p class="sub">Checking the shoreline (wind angle, open water, trees and buildings)...</p>';
   let launchList = [];
+  let siteScore = null;
   if (site?.ok) {
     const s = scoreSite(site, wind, state.mode, p);
+    siteScore = s;
     whyHtml = reasonsHtml(explain(s, site, state.mode, p));
     launchList = launches(s, site);
   }
@@ -515,6 +518,7 @@ async function showLakePopup(f, lngLat) {
       <div class="sub" style="margin-top:4px">${scoreText(p)}</div></div></div>
     <div class="sub">Petal length: kiteable daylight wind (12 to 35 kn) from that direction. Green: the lake works well for that wind.</div>
     <h5>Why this score</h5><div class="whybox">${whyHtml}</div>
+    ${siteScore ? '<div class="actions"><button class="view3d primary">3D spot view</button></div>' : ''}
     <table>
       <tr><td>Area</td><td>${p.a.toFixed(2)} km² (${Math.round(p.a * 247.1)} acres)</td></tr>
       <tr><td>Longest open run</td><td>${fmtKm(maxFetch)} (${(maxFetch * 0.621).toFixed(1)} mi)</td></tr>
@@ -529,6 +533,7 @@ async function showLakePopup(f, lngLat) {
     <div class="actions"><button class="save">Save spot</button><button class="fcbtn">7-day forecast</button><button class="gmap">Copy coordinates</button></div>
     <div class="fc"></div>`;
   el.querySelector('h4').textContent = lakeName(p);
+  if (siteScore) el.querySelector('.view3d').onclick = () => open3d(lakeName(p), site, siteScore, wind, lat, lon);
   el.querySelector('.save').onclick = () => saveSpot(lat, lon, lakeName(p), p.id);
   el.querySelector('.gmap').onclick = () => {
     navigator.clipboard?.writeText(`${lat.toFixed(5)}, ${lon.toFixed(5)}`);
@@ -799,6 +804,22 @@ function reasonsHtml(rs) {
   return `<ul class="why">${rs.map((r) => `<li class="why-${r.kind}"><span>${icon[r.kind]}</span> ${esc(r.text)}</li>`).join('')}</ul>`;
 }
 
+/** Open the 3D spot view for an analysed spot or lake. */
+function open3d(title, raw, s, wind, lat, lon) {
+  popup?.remove();
+  showLaunches([]);
+  enterSpotView(map, {
+    title, raw, s, wind,
+    forecastNow: async () => {
+      const r = await forecast(lat, lon);
+      const local = new Date(Date.now() + (r.utc_offset_seconds || 0) * 1000).toISOString().slice(0, 13);
+      const i = r.hourly.time.findIndex((t) => t.startsWith(local));
+      if (i < 0) return null;
+      return { dir: r.hourly.wind_direction_10m[i], kn: r.hourly.wind_speed_10m[i], gust: r.hourly.wind_gusts_10m?.[i] };
+    },
+  });
+}
+
 /** Popup for a shore spot (a discovered launch or any point you check). */
 async function showSpotPopup(raw, lon, lat, title) {
   const c0 = raw?.cand?.[0];
@@ -817,9 +838,12 @@ async function showSpotPopup(raw, lon, lat, title) {
     <div class="sub">Petals: how often the wind blows from there. Green: works well from this shore.</div>
     <h5>Why this score</h5>${reasonsHtml(explain(s, raw, state.mode))}
     ${monthSvg(wind)}
-    <div class="actions"><button class="save">Save spot</button><button class="fcbtn">7-day forecast</button><button class="gmap">Copy coordinates</button></div>
+    <div class="actions"><button class="view3d primary">3D spot view</button><button class="save">Save spot</button><button class="fcbtn">7-day forecast</button><button class="gmap">Copy coordinates</button></div>
     <div class="fc"></div>`;
   el.querySelector('h4').textContent = title;
+  const v3 = el.querySelector('.view3d');
+  if (raw?.ok) v3.onclick = () => open3d(title, raw, s, wind, lat, lon);
+  else v3.remove();
   el.querySelector('.save').onclick = () => saveSpot(lat, lon, title === 'Launch spot' ? `Spot ${lat.toFixed(3)}, ${lon.toFixed(3)}` : title);
   el.querySelector('.gmap').onclick = () => {
     navigator.clipboard?.writeText(`${lat.toFixed(5)}, ${lon.toFixed(5)}`);

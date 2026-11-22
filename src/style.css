@@ -89,3 +89,20 @@ ul.why li span { flex: none; width: 12px; text-align: center; }
 .why-bad span { color: #c0392b; }
 .why-warn span { color: #c27c0e; }
 .why-info span { color: #5b6b7c; }
+
+/* 3D spot view */
+#sv-panel { position: absolute; top: 10px; left: 10px; z-index: 5; width: 330px; max-height: calc(100% - 20px); overflow: auto;
+  background: rgba(255,255,255,0.96); border-radius: 10px; box-shadow: 0 4px 18px rgba(0,0,0,0.25); padding: 10px 12px; font-size: 12.5px; }
+#sv-panel .sv-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 14px; }
+#sv-panel .sv-sub, #sv-panel .sv-label { color: #5b6b7c; margin: 4px 0; }
+#sv-panel .sv-live { background: #e8f5ec; border-radius: 6px; padding: 4px 6px; margin: 4px 0; }
+#sv-panel .sv-dirs, #sv-panel .sv-orbit { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
+#sv-panel .sv-dirs button { display: flex; flex-direction: column; align-items: center; min-width: 46px; }
+#sv-panel .sv-dirs button small { color: #5b6b7c; font-size: 10px; }
+#sv-panel .sv-dirs button.on { background: #12658f; color: #fff; }
+#sv-panel .sv-dirs button.on small { color: #d6e9f5; }
+#sv-panel ul { margin: 4px 0; padding-left: 18px; }
+#sv-panel li { margin: 2px 0; }
+#sv-panel .sv-legend { display: flex; flex-wrap: wrap; gap: 4px 8px; color: #5b6b7c; margin-top: 6px; }
+#sv-panel .sv-legend span { display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: var(--c); margin-right: 2px; }
+@media (max-width: 600px) { #sv-panel { width: auto; right: 10px; max-height: 45%; } }
