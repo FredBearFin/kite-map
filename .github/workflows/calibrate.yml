@@ -12,7 +12,7 @@ jobs:
       matrix:
         include:
           - { name: before, source: era5, grid: "0.25", nodepth: "1" }
-          - { name: after, source: hires, grid: "0", nodepth: "" }
+          - { name: after, source: hires, grid: "0.1", nodepth: "" }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

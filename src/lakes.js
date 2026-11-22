@@ -54,7 +54,11 @@ export async function loadCell(name) {
 
 // ---------- Wind ----------
 
-const GRID = 0.25; // degrees: ERA5's own grid, so each spot gets its nearest weather cell
+// Wind history comes from archived forecasts of the best local weather model
+// (a few km in North America and Europe, about 10 km elsewhere), which catches
+// sea breezes, lake breezes and valley winds that the 30 km ERA5 reanalysis
+// smooths away. Spots share a 0.1 degree cell (about 10 km).
+const GRID = 0.1;
 
 export function windCellKey(lat, lon) {
   const gl = Math.round(lat / GRID) * GRID;
@@ -74,7 +78,8 @@ export async function getWind(lat, lon) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * Download one year of hourly wind (ERA5 via Open-Meteo) for grid points and
+ * Download one year of hourly wind (high-resolution archived forecasts via
+ * Open-Meteo) for grid points and
  * save kiteable-hour stats. Points already saved are skipped.
  */
 export async function downloadWind(points, onProgress, signal, { retries = 4 } = {}) {
@@ -91,7 +96,7 @@ export async function downloadWind(points, onProgress, signal, { retries = 4 } =
     const lats = part.map((k) => k.split(',')[0]).join(',');
     const lons = part.map((k) => k.split(',')[1]).join(',');
     const url =
-      `https://archive-api.open-meteo.com/v1/archive?latitude=${lats}&longitude=${lons}` +
+      `https://historical-forecast-api.open-meteo.com/v1/forecast?latitude=${lats}&longitude=${lons}` +
       `&start_date=${year}-01-01&end_date=${year}-12-31` +
       `&hourly=wind_speed_10m,wind_direction_10m,temperature_2m&wind_speed_unit=kn&timezone=auto&timeformat=unixtime`;
     let res;

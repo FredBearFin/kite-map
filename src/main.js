@@ -82,7 +82,7 @@ const map = new maplibregl.Map({
   style: buildStyle(),
   center: [OMAHA.lon, OMAHA.lat],
   zoom: 6,
-  attributionControl: { compact: true, customAttribution: 'HydroLAKES, Open-Meteo / ERA5' },
+  attributionControl: { compact: true, customAttribution: 'HydroLAKES, Open-Meteo' },
 });
 map.addControl(new maplibregl.NavigationControl(), 'top-right');
 map.addControl(new maplibregl.ScaleControl({ unit: 'imperial' }), 'bottom-right');

@@ -8,13 +8,15 @@
 //   - the wind shadow of trees, buildings and hills on the upwind shore
 //   - how much water there is to ride back and forth across the wind
 //   - how far the launch is from a road
+//   - what the shore is like: a sand beach, bare rock, a built-up waterfront
+//     (seawalls and docks) or a steep bank or cliff, where you can't launch
 //   - how deep the water is off the launch, where the terrain data has sea-floor
 //     depths (most coasts): shallow flats you can stand on make even offshore
 //     wind workable, as on the big lagoons
 // Pure functions with no browser APIs, shared by the app and the calibration
 // script (tools/calibrate.mjs).
 
-export const SITE_VERSION = 2;
+export const SITE_VERSION = 3;
 
 // How far behind an obstacle the wind stays gusty and weak, in multiples of its
 // height. Kiting guides give 7 to 20 times; 10 is a common middle value. Hills
@@ -213,6 +215,11 @@ export function analyzeSite(input) {
     // A road over open water is a bridge (or a causeway): a hazard to ride near.
     if (water[i]) { bridge[i] = 1; bridges = true; } else { road[i] = 1; roadsKnown = true; }
   });
+  // Shore type: sand beaches, bare rock.
+  const beachM = new Uint8Array(N);
+  let beachesKnown = false;
+  for (const poly of input.beach || []) fillPolygon(g, poly, (i) => { beachM[i] = 1; beachesKnown = true; });
+  for (const poly of input.rock || []) fillPolygon(g, poly, (i) => { if (!beachM[i]) beachM[i] = 2; });
   const roadDist = roadsKnown ? distanceFrom(g, road, Math.ceil(2000 / g.cell)) : null;
   const bridgeDist = bridges ? distanceFrom(g, bridge, Math.ceil(1000 / g.cell)) : null;
   const nearLake = lakeMask ? distanceFrom(g, lakeMask, Math.ceil(300 / g.cell)) : null;
@@ -275,7 +282,8 @@ export function analyzeSite(input) {
   // Depth off the shore. The terrain tiles carry sea-floor depths on most
   // coasts (below sea level), but lakes only show their surface. Depths count
   // only where the water body shows real depths somewhere.
-  const seaLevel = waterElev != null && waterElev < 15 ? 0 : waterElev;
+  // Only below-sea-level depths count: inland lakes show just their surface.
+  const seaLevel = waterElev != null && waterElev < 15 ? 0 : null;
   const depthAt = (x, y) => {
     if (!input.dem || seaLevel == null) return null;
     const v = input.dem(g.lon(x), g.lat(y));
@@ -327,6 +335,20 @@ export function analyzeSite(input) {
     if (len < 0.5) continue;
     const ne = se / len, nn = sn / len;
     const access = roadDist ? Math.min(2000, roadDist[i] * g.cell) : null;
+    // The land right behind the launch: beach, rock, buildings, and how
+    // steeply it rises (a bank or cliff leaves nowhere to lay out a kite).
+    let beach = 0, rock = 0, built = 0, bank = 0;
+    for (const off of [0, 20, 40, 70]) {
+      const j = at(cx + (ne * off) / g.cell, cy - (nn * off) / g.cell);
+      if (j < 0) continue;
+      if (beachM[j] === 1) beach = 1;
+      else if (beachM[j] === 2 && off <= 40) rock = 1;
+      if (!water[j] && coverC[j] === 2 && off >= 20) built = 1;
+    }
+    for (const off of [60, 120]) {
+      const j = at(cx + (ne * off) / g.cell, cy - (nn * off) / g.cell);
+      if (j >= 0 && !water[j]) bank = Math.max(bank, Math.round(terrainAt(j)));
+    }
     const dirs = [];
     for (let d = 0; d < 16; d++) {
       const B = (d * 22.5 * Math.PI) / 180;
@@ -360,7 +382,10 @@ export function analyzeSite(input) {
       }
       dirs.push([th, Math.round(up.d), up.open ? 1 : 0, Math.round(sh), src, shH, Math.round(reach)]);
     }
-    const c = { lon: +g.lon(cx).toFixed(5), lat: +g.lat(cy).toFixed(5), face: toCompass((Math.atan2(-ne, -nn) * 180) / Math.PI), access, dirs };
+    const c = { lon: +g.lon(cx).toFixed(5), lat: +g.lat(cy).toFixed(5), face: toCompass((Math.atan2(-ne, -nn) * 180) / Math.PI), access, dirs, bank };
+    if (beach) c.beach = 1;
+    if (rock && !beach) c.rock = 1;
+    if (built && !beach) c.built = 1;
     if (bathy) {
       // Depth 150, 300 and 600 m out from the shore (m, 0 when the data shows
       // none), so standable flats can be told from a drop-off.
@@ -390,6 +415,7 @@ export function analyzeSite(input) {
     roadsKnown,
     waterElev: waterElev == null ? null : Math.round(waterElev),
     bathy,
+    beachesKnown,
     cand,
   };
 }
@@ -417,7 +443,27 @@ export const PARAMS = {
   accessFarF: 0.85,
   accessNoneF: 0.6,
   top: 2,
+  // Shore type: a bank this many metres high within 120 m is a bluff or
+  // cliff; bare rock and built-up waterfronts (seawalls, docks) are hard to
+  // launch from; a sand beach is ideal.
+  bankHigh: 15,
+  bankMid: 8,
+  shoreCliff: 0.3,
+  shoreBank: 0.7,
+  shoreRock: 0.5,
+  shoreBuilt: 0.7,
 };
+
+/** How launchable the shore itself is (0..1), and why. */
+export function shoreFactor(c, P = PARAMS) {
+  if (c.beach) return { f: 1, why: 'beach' };
+  let f = 1, why = null;
+  if (c.bank != null && c.bank >= P.bankHigh) { f = P.shoreCliff; why = 'cliff'; }
+  else if (c.bank != null && c.bank >= P.bankMid) { f = P.shoreBank; why = 'bank'; }
+  if (c.rock && P.shoreRock < f) { f = P.shoreRock; why = 'rock'; }
+  if (c.built && P.shoreBuilt < f) { f = P.shoreBuilt; why = 'built'; }
+  return { f, why };
+}
 
 export function angleFactor(th, P = PARAMS, shallow = false) {
   for (const [lim, f] of shallow && P.shallowAngle ? P.shallowAngle : P.angle) if (th <= lim) return f;
@@ -445,8 +491,9 @@ export function rate(raw, P = PARAMS) {
       const fc = clean <= P.cleanMin ? 0 : 1 - Math.exp(-(clean - P.cleanMin) / P.cleanScale);
       const fr = 1 - Math.exp(-reach / P.reachScale);
       const fx = c.access == null ? 1 : c.access <= P.accessNear ? 1 : c.access <= P.accessFar ? P.accessFarF : P.accessNoneF;
-      const q = fa * fc * Math.sqrt(fr) * fx * (c.river ? P.river : 1);
-      qs.push({ ci, q, fa, fc, fr, fx, th, W, open, sh, src, shH, reach, clean, shallow });
+      const fs = shoreFactor(c, P).f;
+      const q = fa * fc * Math.sqrt(fr) * fx * fs * (c.river ? P.river : 1);
+      qs.push({ ci, q, fa, fc, fr, fx, fs, th, W, open, sh, src, shH, reach, clean, shallow });
     });
     qs.sort((a, b) => b.q - a.q);
     const top = qs.slice(0, P.top);

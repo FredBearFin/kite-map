@@ -55,7 +55,7 @@ const PLACES = [
   { name: 'Cherry Creek Reservoir, CO', lat: 39.64, lon: -104.855, expect: 'good' },
   { name: 'Lake Pepin (Mississippi), MN', lat: 44.5, lon: -92.29, expect: 'good' },
   // Not kite spots. Coasts: cliffs, harbours, fjords, rocky and sheltered shores.
-  { name: 'Big Sur cliffs, CA', lat: 36.27, lon: -121.81, expect: 'poor', coast: true },
+  { name: 'Big Sur cliffs, CA', lat: 36.27, lon: -121.835, expect: 'poor', coast: true },
   { name: 'Baltimore Inner Harbor, MD', lat: 39.284, lon: -76.608, expect: 'poor', coast: true },
   { name: 'Boston Inner Harbor, MA', lat: 42.36, lon: -71.045, expect: 'poor', coast: true },
   { name: 'Acadia rocky coast, ME', lat: 44.33, lon: -68.185, expect: 'poor', coast: true },

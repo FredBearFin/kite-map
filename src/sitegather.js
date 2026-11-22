@@ -32,6 +32,9 @@ export function zoomFor(bbox, z1, z0, maxTiles) {
   return z;
 }
 
+const BEACH = new Set(['beach', 'sand', 'dune']);
+const ROCK = new Set(['bare_rock', 'rock', 'cliff', 'scree']);
+
 /** Decode one basemap tile into water, cover and road features (lon/lat). */
 export function tileFeatures(bytes, z, x, y, out) {
   if (!bytes || !bytes.length) return out;
@@ -50,6 +53,9 @@ export function tileFeatures(bytes, z, x, y, out) {
   });
   for (const layer of ['landcover', 'landuse', 'natural']) {
     each(layer, (gj, p) => {
+      // Sand beaches are where kites launch; bare rock and cliffs are not.
+      if (BEACH.has(p.kind)) for (const poly of polys(gj.geometry)) (out.beach ||= []).push(poly);
+      if (ROCK.has(p.kind)) for (const poly of polys(gj.geometry)) (out.rock ||= []).push(poly);
       const hc = coverHeight(p.kind);
       if (!hc || !hc[0]) return;
       for (const poly of polys(gj.geometry)) out.cover.push({ poly, h: hc[0], code: hc[1] });
@@ -74,7 +80,7 @@ const terrarium = (d, k) => d[k] * 256 + d[k + 1] + d[k + 2] / 256 - 32768;
  * getDem(z, x, y) -> RGBA pixels (256x256) of the terrain tile, or null.
  */
 export async function gatherInputs(bbox, getTile, getDem, { maxTiles = 36 } = {}) {
-  const out = { water: [], cover: [], roads: [], tiles: 0, missing: 0 };
+  const out = { water: [], cover: [], roads: [], beach: [], rock: [], tiles: 0, missing: 0 };
   const z = zoomFor(bbox, 13, 8, maxTiles);
   const r = tileRange(bbox, z);
   const jobs = [];

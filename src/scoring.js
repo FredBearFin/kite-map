@@ -6,7 +6,7 @@ import { dirSuitability, fetchByAxis } from './geo.js';
 export const KITE_MIN_KN = 12;
 export const KITE_MAX_KN = 35;
 export const EASY_MAX_KN = 22; // beginner-friendly upper limit
-export const WIND_VERSION = 2;
+export const WIND_VERSION = 3; // 3: high-resolution wind history
 
 const dirOf = (deg) => Math.round((((deg % 360) + 360) % 360) / 22.5) % 16;
 

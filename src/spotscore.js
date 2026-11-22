@@ -2,7 +2,7 @@
 // and explain the score in plain words.
 
 import { DIRS16 } from './geo.js';
-import { PARAMS, SOURCE_NAMES, isShallow, rate } from './site.js';
+import { PARAMS, SOURCE_NAMES, isShallow, rate, shoreFactor } from './site.js';
 import { iceMonths, shallowFactor, waterFactor } from './scoring.js';
 
 // On ice the launch angle hardly matters: you can walk out anywhere.
@@ -20,6 +20,13 @@ export function angleWord(th) {
   if (th < 110) return 'side-offshore';
   return 'offshore';
 }
+
+const SHORE_WHY = {
+  cliff: 'the shore where it would work is a cliff or steep bluff, with nowhere to launch',
+  bank: 'the shore where it would work is a steep bank, with little room to launch',
+  rock: 'the shore where it would work is bare rock',
+  built: 'the shore where it would work is built up (seawalls, docks, buildings)',
+};
 
 const fmtM = (m) => (m >= 1000 ? `${(m / 1000).toFixed(m >= 10000 ? 0 : 1)} km` : `${Math.round(m / 10) * 10} m`);
 
@@ -85,7 +92,7 @@ export function explain(s, raw, mode = 'water', props = {}) {
   for (const d of common.slice(0, s.hours ? 3 : 0)) {
     const b = s.best[d];
     if (!b) continue;
-    const f = Math.min(b.fa, b.fc, Math.sqrt(b.fr), b.fx);
+    const f = Math.min(b.fa, b.fc, Math.sqrt(b.fr), b.fx, b.fs ?? 1);
     let why;
     if (f === b.fa) why = `the wind is ${angleWord(b.th)} ${raw.cand.length > 1 ? 'at every shore here' : 'at this launch'}`;
     else if (f === b.fc) {
@@ -93,6 +100,7 @@ export function explain(s, raw, mode = 'water', props = {}) {
         ? `${SOURCE_NAMES[b.src]} on the upwind shore (about ${b.shH} m high) leave it gusty for ${fmtM(b.sh)}, with only ${fmtM(b.W)} of water`
         : `only ${fmtM(b.W)} of open water upwind, so it stays gusty and light`;
     } else if (f === Math.sqrt(b.fr)) why = `only ${fmtM(b.reach)} of water to ride across the wind`;
+    else if (f === b.fs) why = SHORE_WHY[shoreFactor(raw.cand[b.ci]).why] || 'the shore is hard to launch from';
     else why = `the nearest road is ${fmtM(raw.cand[b.ci].access)} from the launch that works`;
     out.push({ kind: 'bad', text: `${DIRS16[d]} wind (${H[d]} h/yr) doesn't work well: ${why}.` });
   }
@@ -109,6 +117,12 @@ export function explain(s, raw, mode = 'water', props = {}) {
   if (props.wc === 'green') out.push({ kind: 'bad', text: 'Green water on satellite: algae likely (score lowered).' });
   if (props.wc === 'murky') out.push({ kind: 'bad', text: 'Brown, murky water on satellite (score lowered).' });
   if (raw.waterFromLake) out.push({ kind: 'info', text: 'Map detail is not saved here, so the coarse HydroLAKES outline was used.' });
+  // What the shore is like at the best launch.
+  if (c) {
+    const sf = shoreFactor(c).why;
+    if (sf === 'beach') out.push({ kind: 'good', text: 'Sand beach at the best launch: room to lay out and launch.' });
+    else if (sf && sf in SHORE_WHY) out.push({ kind: 'warn', text: `${SHORE_WHY[sf].replace('the shore where it would work is', 'The best launch is on')}.`.replace('is on a cliff', 'is below a cliff') });
+  }
   // Depth off the launches, where the terrain data has sea-floor depths.
   const shallowN = raw.cand.filter((c) => isShallow(c)).length;
   if (top && c && isShallow(c)) out.push({ kind: 'good', text: `Shallow water off the best launch (about ${c.depth[0]} m deep 150 m out, ${c.depth[1]} m at 300 m): you can stand up, so even side-offshore wind is workable.` });
