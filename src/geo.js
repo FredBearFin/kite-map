@@ -131,9 +131,11 @@ export function axisOfDir(d16) {
 export function dirSuitability(fetch8, d16, opts = {}) {
   const along = fetch8[axisOfDir(d16)];
   const across = fetch8[axisOfDir(d16 + 4)];
-  const needAlong = opts.needAlong ?? 1500;
-  const needAcross = opts.needAcross ?? 800;
-  return Math.min(1, along / needAlong) * Math.min(1, across / needAcross);
+  // Soft curves: more water keeps helping (steadier wind, more room), so a
+  // 35 km reservoir rates above a 4 km one, which rates above a 1.5 km pond.
+  const kAlong = opts.needAlong ?? 2500;
+  const kAcross = opts.needAcross ?? 1200;
+  return (1 - Math.exp(-along / kAlong)) * Math.sqrt(1 - Math.exp(-across / kAcross));
 }
 
 export function dirIndex(deg) {

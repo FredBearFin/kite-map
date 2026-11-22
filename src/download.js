@@ -2,7 +2,7 @@
 
 import { backend } from './backend.js';
 import { bufferBbox, countTiles, tilesIn } from './geo.js';
-import { cellsFor, downloadWind, filterBbox, lakeCenter, loadCell, scoreFeatures, windCellKey } from './lakes.js';
+import { cellsFor, downloadWind, filterBbox, lakeCenter, lakeIndex, loadCell, scoreFeatures, windCellKey } from './lakes.js';
 import { ASSETS, fetchAsset, fetchTile } from './tiles.js';
 import { attachWaterColors, measureLake } from './watercolor.js';
 
@@ -88,9 +88,11 @@ export async function downloadRegion(region, progress, signal) {
   const bbox = region.bbox;
   const report = { failed: 0 };
 
-  // 1. Lakes
+  // 1. Lakes (from the local lake database)
+  // Without the lake database the area still downloads its map, terrain and fonts.
+  const haveLakes = !!(await lakeIndex());
   progress('Lakes', 0, 1);
-  const cells = cellsFor(bbox);
+  const cells = haveLakes ? cellsFor(bbox) : [];
   let lakes = [];
   for (let i = 0; i < cells.length; i++) {
     if (signal?.aborted) throw new Error('cancelled');

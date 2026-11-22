@@ -77,3 +77,64 @@ progress { width: 100%; }
 .badge { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 8px; background: #eef2f6; color: var(--muted); margin-right: 4px; }
 .badge.warn { background: #fde7e4; color: var(--danger); }
 .badge.good { background: #dff3e4; color: #1e6b34; }
+.box { border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; margin-bottom: 12px; background: var(--bg); }
+.box code { font-size: 11px; }
+.banner { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 5; background: #1d2733; color: #fff; padding: 8px 14px; border-radius: 6px; font-size: 13px; max-width: 70%; box-shadow: 0 2px 10px rgba(0,0,0,.2); }
+
+.pop h5 { margin: 8px 0 2px; font-size: 12px; }
+ul.why { list-style: none; margin: 0; padding: 0; font-size: 12px; }
+ul.why li { display: flex; gap: 6px; padding: 2px 0; line-height: 1.35; }
+ul.why li span { flex: none; width: 12px; text-align: center; }
+.why-good span { color: #2a9d55; }
+.why-bad span { color: #c0392b; }
+.why-warn span { color: #c27c0e; }
+.why-info span { color: #5b6b7c; }
+
+/* 3D spot view */
+#sv-panel { position: absolute; top: 10px; left: 10px; z-index: 5; width: 350px; max-height: calc(100% - 20px); overflow: auto;
+  background: rgba(255,255,255,0.96); border-radius: 10px; box-shadow: 0 4px 18px rgba(0,0,0,0.25); padding: 10px 12px; font-size: 12.5px; }
+#sv-panel .sv-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 14px; }
+#sv-panel .sv-sub, #sv-panel .sv-label { color: #5b6b7c; margin: 4px 0; }
+#sv-panel .sv-live { background: #e8f5ec; border-radius: 6px; padding: 4px 6px; margin: 4px 0; }
+#sv-panel .sv-dirs, #sv-panel .sv-orbit { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
+#sv-panel .sv-dirs button { display: flex; flex-direction: column; align-items: center; min-width: 46px; }
+#sv-panel .sv-dirs button small { color: #5b6b7c; font-size: 10px; }
+#sv-panel .sv-dirs button.on { background: #12658f; color: #fff; }
+#sv-panel .sv-dirs button.on small { color: #d6e9f5; }
+#sv-panel ul { margin: 4px 0; padding-left: 18px; }
+#sv-panel li { margin: 2px 0; }
+#sv-panel .sv-legend { display: flex; flex-wrap: wrap; gap: 4px 8px; color: #5b6b7c; margin-top: 6px; }
+#sv-panel .sv-legend span { display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: var(--c); margin-right: 2px; }
+#sv-panel .sv-wind { background: #f1f6fa; border-radius: 8px; padding: 6px 8px; margin: 6px 0; }
+#sv-panel .sv-wind label { display: block; margin: 2px 0; }
+#sv-panel .sv-wind label small { color: #5b6b7c; }
+#sv-panel .sv-wind input[type=range] { width: 100%; margin: 2px 0 4px; }
+#sv-panel .sv-verdict { font-weight: 600; margin: 2px 0 4px; }
+#sv-panel .sv-good { color: #1f7a3d; } #sv-panel .sv-warn { color: #b26a00; } #sv-panel .sv-bad { color: #c62828; }
+#sv-panel .sv-dirs { align-items: center; }
+#sv-panel .sv-dirs > span { color: #5b6b7c; margin-right: 2px; }
+#sv-panel .sv-dirs button { flex-direction: row; gap: 3px; min-width: 0; padding: 2px 6px; }
+#sv-panel .sv-steps { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; margin: 6px 0; }
+#sv-panel .sv-steps button { text-align: left; padding: 4px 6px; font-size: 11.5px; line-height: 1.2; }
+#sv-panel .sv-steps button span { display: inline-block; width: 16px; height: 16px; border-radius: 50%; background: #d6e4ef; text-align: center; font-size: 10.5px; line-height: 16px; margin-right: 4px; }
+#sv-panel .sv-steps button.on { background: #12658f; color: #fff; }
+#sv-panel .sv-steps button.on span { background: #fff; color: #12658f; }
+#sv-panel .sv-card { border: 1px solid #d6e4ef; border-radius: 8px; padding: 6px 10px; }
+#sv-panel .sv-card h4 { margin: 2px 0 4px; font-size: 14px; color: #12658f; }
+#sv-panel .sv-card p { margin: 4px 0; line-height: 1.4; }
+#sv-panel .sv-nav { display: flex; justify-content: space-between; gap: 6px; margin-top: 6px; }
+#sv-panel .sv-more { margin: 6px 0; } #sv-panel .sv-more summary { cursor: pointer; color: #12658f; }
+#sv-panel .sv-note { color: #8a97a5; font-size: 11px; margin-top: 4px; }
+@media (max-width: 600px) { #sv-panel { width: auto; right: 10px; max-height: 45%; } }
+.maplibregl-popup-content .pop { max-height: min(70vh, 640px); overflow-y: auto; }
+
+/* Forecast tab */
+.fc-days { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 6px 0; }
+.fc-days button { padding: 2px 7px; font-size: 12px; }
+.fc-days button.on { background: #12658f; color: #fff; }
+.fc-grid th.on { color: #12658f; text-decoration: underline; }
+.fc-session { border: 1px solid var(--line); border-left: 4px solid #2a9d55; border-radius: 6px; padding: 5px 8px; margin: 4px 0; cursor: pointer; font-size: 12.5px; }
+.fc-session:hover { background: #f1f6fa; }
+.fc-session .name { font-weight: 600; }
+#fc-best h5 { margin: 8px 0 2px; }
+.pop .access .why { margin-top: 2px; }

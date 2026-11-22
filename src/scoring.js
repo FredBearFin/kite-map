@@ -6,15 +6,36 @@ import { dirSuitability, fetchByAxis } from './geo.js';
 export const KITE_MIN_KN = 12;
 export const KITE_MAX_KN = 35;
 export const EASY_MAX_KN = 22; // beginner-friendly upper limit
-export const WIND_VERSION = 2;
+export const WIND_VERSION = 4; // 4: high-resolution, 3 years, real daylight
 
 const dirOf = (deg) => Math.round((((deg % 360) + 360) % 360) / 22.5) % 16;
 
 /**
+ * Is the sun up at this moment (unix seconds) and place? Used for kiteable
+ * daylight, so short winter days count fewer hours than long summer ones, and
+ * no time zone or daylight saving rules are needed. Accurate to a few minutes.
+ */
+export function sunUp(t, lat, lon, minElevDeg = 0) {
+  const rad = Math.PI / 180;
+  const d = t / 86400 - 10957.5; // days since 2000-01-01 12:00 UTC
+  const g = (357.529 + 0.98560028 * d) * rad;
+  const q = 280.459 + 0.98564736 * d;
+  const L = (q + 1.915 * Math.sin(g) + 0.02 * Math.sin(2 * g)) * rad;
+  const e = (23.439 - 0.00000036 * d) * rad;
+  const dec = Math.asin(Math.sin(e) * Math.sin(L));
+  const ra = Math.atan2(Math.cos(e) * Math.sin(L), Math.cos(L));
+  const gmst = (18.697374558 + 24.06570982441908 * d) % 24;
+  const ha = (gmst * 15 + lon) * rad - ra;
+  const el = Math.asin(Math.sin(lat * rad) * Math.sin(dec) + Math.cos(lat * rad) * Math.cos(dec) * Math.cos(ha));
+  return el > minElevDeg * rad;
+}
+
+/**
  * Summarise hourly wind into kiteable hours per year by direction and month.
- * speeds in knots, dirs in degrees (direction wind comes FROM), hours = local
- * hour of day, months = local month 0-11, temps = air temperature in C.
- * Only daylight hours (9:00 to 19:59) count as kiteable.
+ * speeds in knots, dirs in degrees (direction wind comes FROM), day = per hour
+ * true when it is daylight (or the local hour of day, then 9:00 to 19:59
+ * counts), months = month 0-11, temps = air temperature in C, years = how many
+ * years the data covers (results are per year).
  */
 export function windStats(speeds, dirs, hours, years = 1, months = null, temps = null) {
   const byDir = new Array(16).fill(0);
@@ -35,7 +56,7 @@ export function windStats(speeds, dirs, hours, years = 1, months = null, temps =
     sum += s;
     n++;
     const h = hours[i];
-    if (h < 9 || h > 19) continue;
+    if (typeof h === 'boolean' ? !h : h < 9 || h > 19) continue;
     daylight++;
     if (s >= KITE_MIN_KN && s <= KITE_MAX_KN) {
       kite++;
@@ -85,9 +106,13 @@ export function lakeShape(feature) {
  * to be weedy, mucky and green by mid-summer, and are too shallow for fins in
  * places. A mild penalty; deep lakes are not penalised.
  */
-export function shallowFactor(avgDepthM) {
+export function shallowFactor(avgDepthM, mode = 'water') {
   if (avgDepthM == null) return 1;
-  return avgDepthM < 1.5 ? 0.75 : 1;
+  // Shallow water you can stand in is a plus for learning; for everyone else
+  // a very shallow lake mostly means weeds and muck. (Small-lake depths in
+  // HydroLAKES are modelled estimates, so the effect is kept mild.)
+  if (avgDepthM < 1.5) return mode === 'beginner' ? 1.1 : 0.85;
+  return 1;
 }
 
 /** Water colour from satellite imagery: clear water scores best. */
@@ -97,7 +122,10 @@ export function waterFactor(color) {
   return 1;
 }
 
-const toScore = (eff, scale) => Math.round(100 * (1 - Math.exp(-eff / scale)));
+// Score from effective hours: half of `scale` hours gives 33, `scale` gives 50,
+// three times it 75, nine times it 90. It keeps rising for windier, bigger
+// places instead of bunching up in the 90s.
+export const toScore = (eff, scale) => Math.min(100, Math.round((100 * eff) / (eff + scale)));
 
 /**
  * Score one lake. mode: 'water' (default), 'beginner' or 'snow'.
@@ -114,19 +142,19 @@ export function scoreLake(fetch8, wind, mode = 'water', props = {}) {
     if (!wind?.byMonth) return { score: Math.round(space * 40), effHours: null, suit, basis: 'shape' };
     const hours = ice.reduce((s, m) => s + wind.byMonth[m], 0);
     const eff = hours * space;
-    return { score: toScore(eff, 150), effHours: Math.round(eff), suit, basis: ice.length ? 'ice' : 'no-ice' };
+    return { score: toScore(eff, 80), effHours: Math.round(eff), suit, basis: ice.length ? 'ice' : 'no-ice' };
   }
-  const quality = shallowFactor(props.d) * waterFactor(props.wc);
+  const quality = shallowFactor(props.d, mode) * waterFactor(props.wc);
   if (!wind || !wind.kiteHours) {
     const mean = suit.reduce((a, b) => a + b, 0) / 16;
-    return { score: Math.round(mean * 60 * quality), effHours: null, suit, basis: 'shape' };
+    return { score: Math.min(100, Math.round(mean * 60 * quality)), effHours: null, suit, basis: 'shape' };
   }
   // Beginners: count only lighter, more forgiving wind (12 to 22 kn).
   const dirs = mode === 'beginner' && wind.easyByDir ? wind.easyByDir : wind.byDir;
   let eff = 0;
   for (let d = 0; d < 16; d++) eff += dirs[d] * suit[d];
   eff *= quality;
-  return { score: toScore(eff, mode === 'beginner' ? 200 : 300), effHours: Math.round(eff), suit, basis: 'wind' };
+  return { score: toScore(eff, mode === 'beginner' ? 120 : 180), effHours: Math.round(eff), suit, basis: 'wind' };
 }
 
 /** Wind directions (labels) where this lake works well, best first. */

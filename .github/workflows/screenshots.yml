@@ -1,0 +1,57 @@
+name: Screenshots
+
+on:
+  push:
+    paths: ["src/**", "index.html", "tools/screenshots.cjs", ".github/workflows/screenshots.yml"]
+
+permissions:
+  contents: write
+
+jobs:
+  screenshots:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm install --no-save playwright@1.63.0 && npx playwright install --with-deps chromium
+      - run: npx vite build
+      - name: Check the forecast service is reachable
+        run: |
+          for u in "https://api.open-meteo.com/v1/forecast?latitude=41.2&longitude=-101.7&hourly=wind_speed_10m&forecast_days=1" "https://archive-api.open-meteo.com/v1/archive?latitude=41.2&longitude=-101.7&start_date=2025-01-01&end_date=2025-01-02&hourly=wind_speed_10m" "https://api.met.no/weatherapi/locationforecast/2.0/compact?lat=41.2&lon=-101.7"; do
+            curl -sS -m 25 -A "kite-map-ci/1.0 github.com/FredBearFin/kite-map" -o /dev/null -w "%{http_code} %{time_total}s $u\n" "$u" || echo "FAILED $u"
+          done
+      - run: |
+          npx vite preview --port 4173 &
+          sleep 3
+          node tools/screenshots.cjs screenshots
+      - name: Make GIFs from the animation frames
+        run: |
+          sudo apt-get install -y -qq ffmpeg >/dev/null
+          for d in screenshots/frames-*; do
+            [ -d "$d" ] || continue
+            n=${d#screenshots/frames-}
+            ffmpeg -loglevel error -y -framerate 4 -i "$d/%03d.png" -vf "scale=960:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=160[p];[b][p]paletteuse=dither=bayer" "screenshots/anim-$n.gif"
+          done
+          ls -la screenshots
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: |
+            screenshots/*.png
+            screenshots/*.gif
+      - name: Publish to the screenshots branch
+        run: |
+          set -e
+          sha=${GITHUB_SHA::7}
+          mkdir -p /tmp/shots && cp screenshots/*.png /tmp/shots/ && (cp screenshots/*.gif /tmp/shots/ 2>/dev/null || true)
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin screenshots || true
+          if git rev-parse --verify origin/screenshots >/dev/null 2>&1; then git checkout -f -B screenshots origin/screenshots; else git checkout -f --orphan screenshots && git rm -rfq . ; fi
+          git clean -fdxq -e node_modules
+          mkdir -p "$sha" && cp /tmp/shots/* "$sha/"
+          git add "$sha" && git commit -qm "Screenshots for $sha" && git push origin screenshots

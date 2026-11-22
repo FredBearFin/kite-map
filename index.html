@@ -52,14 +52,42 @@
           <ol id="spot-list"></ol>
         </section>
         <section id="tab-forecast" class="tab">
-          <p class="hint">Next 7 days for your saved spots. <b>Go</b>: 3 or more daylight hours of 12 to 35 kn from a direction that works on that lake. <b>Maybe</b>: some kiteable wind, but short or from a poor direction.</p>
-          <label class="check"><input id="fc-known" type="checkbox" checked /> Include reference spots</label>
+          <p class="hint">Which spots work when, over the next 7 days. Each hour is rated with that shore's own setup: wind speed 12 to 35 kn (12 to 22 in beginner mode), from a direction that works at that launch, and not too gusty. <b>Go</b>: 3 or more good hours in a row. Numbers are good hours; ~ means gusty.</p>
+          <label class="check"><input id="fc-known" type="checkbox" checked /> Include the best launch spots found in view</label>
           <div class="row"><button id="fc-refresh" class="primary">Check forecast</button></div>
           <p id="fc-status" class="hint"></p>
+          <div id="fc-days" class="fc-days"></div>
+          <div id="fc-best"></div>
           <div id="fc-table"></div>
         </section>
         <section id="tab-regions" class="tab">
-          <p class="hint">Download an area once, then use it with no internet. Click <b>Draw area</b>, then drag a box on the map.</p>
+          <div id="lakedb" class="box">
+            <h3 style="margin-top:0">Lake database</h3>
+            <p id="lakedb-status" class="hint"></p>
+            <div class="row"><button id="lakedb-import" class="primary">Import lake zip</button><button id="lakedb-download">Download it (820 MB)</button></div>
+            <div id="lakedb-progress" hidden>
+              <div id="lakedb-step" class="hint"></div>
+              <progress id="lakedb-bar" max="1" value="0"></progress>
+              <div class="hint">This takes a few minutes. Keep the app open.</div>
+            </div>
+          </div>
+          <div id="world" class="box">
+            <h3 style="margin-top:0">World map (offline)</h3>
+            <p id="world-status" class="hint"></p>
+            <label>Detail <select id="world-zoom">
+              <option value="8">Overview: countries, highways, big lakes (zoom 8)</option>
+              <option value="10" selected>Standard: towns, roads, most water (zoom 10)</option>
+              <option value="12">Detailed: small roads and ponds (zoom 12)</option>
+            </select></label>
+            <div class="row"><button id="world-size">Check size</button><button id="world-go" class="primary" hidden>Download</button></div>
+            <div id="world-progress" hidden>
+              <div id="world-step" class="hint"></div>
+              <progress id="world-bar" max="1" value="0"></progress>
+              <button id="world-stop">Pause</button>
+              <div class="hint">You can pause or close the app; the download picks up where it left off.</div>
+            </div>
+          </div>
+          <p class="hint">For full street detail, satellite, terrain and wind in an area, download it here. Click <b>Draw area</b>, then drag a box on the map.</p>
           <button id="draw" class="primary">Draw area</button>
           <div id="dl-panel" hidden>
             <h3>New region</h3>
@@ -85,19 +113,26 @@
         </section>
         <section id="tab-layers" class="tab">
           <label class="check"><input id="l-lakes" type="checkbox" checked /> Lake kite scores</label>
-          <label class="check"><input id="l-known" type="checkbox" checked /> Reference kite spots and schools</label>
+          <label class="check"><input id="l-known" type="checkbox" checked /> Launch spots found on any shore (coast, bay, river, lake)</label>
           <label class="check"><input id="l-sat" type="checkbox" /> Satellite imagery (check beaches and weed beds)</label>
           <label class="check"><input id="l-hill" type="checkbox" checked /> Terrain shading</label>
           <label class="check"><input id="l-geo" type="checkbox" /> Geology (Macrostrat)</label>
           <h3>How spots are scored</h3>
-          <p class="hint">Each lake gets 0 to 100. For each of 16 wind directions it checks the longest clear run of water along the wind (1.5 km or more is ideal) and the width across it (800 m or more). Those are weighted by how many daylight hours per year the wind blows 12 to 35 knots from that direction, using last year's hourly ERA5 weather data. Lakes whose water looks green or murky on summer satellite imagery, or that are very shallow on average (likely weedy or mucky), score lower.</p>
+          <p class="hint">Every shore in view is checked, whether it's a lake, a coast, a bay or a wide river. Nothing is hand-picked. For each stretch of shore and each of 16 wind directions it looks at:</p>
+          <ul class="hint">
+            <li><b>Wind angle to the shore.</b> Side-onshore is best and side-shore is good. Straight onshore is safe but hard to get out. Offshore blows you away from land, so it scores near zero.</li>
+            <li><b>Clean wind.</b> This is how far the wind crosses open water before the launch, minus the gusty shadow behind trees, buildings and bluffs on the upwind shore (about 10 times their height, or 6 times for hills).</li>
+            <li><b>Room to ride</b> back and forth across the wind.</li>
+            <li><b>Road access</b> to the launch, plus bridges nearby. River banks are marked, because of current, barges and sandbars.</li>
+          </ul>
+          <p class="hint">Each direction's rating is multiplied by how many daylight hours a year the wind blows 12 to 35 knots from there (from last year's hourly wind, archived from the best local weather model). Coasts with sea-floor depth data also get checked for shallow flats you can stand in. That total gives a score from 0 to 100. Click a lake or a dot to see why it got its score and where to launch. Green or murky water on satellite, and very shallow lakes, score lower.</p>
           <div class="legend"><span style="--c:#9fb3c8"></span>0<span style="--c:#f2c14e"></span>40<span style="--c:#f78154"></span>70<span style="--c:#d7263d"></span>90+</div>
           <h3>Data</h3>
-          <p class="hint">Map © OpenStreetMap contributors, Protomaps. Lakes: HydroLAKES (Messager et al. 2016), CC BY 4.0. Wind: Open-Meteo, ERA5 (Copernicus), CC BY 4.0. Terrain: Mapzen / AWS Terrain Tiles. Geology: Macrostrat, CC BY 4.0. Satellite: Sentinel-2 cloudless 2024 by EOX IT Services GmbH (contains modified Copernicus Sentinel data 2024), free for non-commercial use. Road times: OSRM.</p>
+          <p class="hint">Map © OpenStreetMap contributors, Protomaps. Lakes: HydroLAKES (Messager et al. 2016), CC BY 4.0. Wind: Open-Meteo historical forecasts (national weather services' models), CC BY 4.0. Bathymetry: in the Mapzen terrain tiles (NOAA, GEBCO, ETOPO1). Terrain: Mapzen / AWS Terrain Tiles. Geology: Macrostrat, CC BY 4.0. Satellite: Sentinel-2 cloudless 2024 by EOX IT Services GmbH (contains modified Copernicus Sentinel data 2024), free for non-commercial use. Road times: OSRM.</p>
           <p id="folder" class="hint"></p>
         </section>
       </aside>
-      <main id="map"></main>
+      <main id="map"><div id="banner" class="banner" hidden></div></main>
       <div id="ctx" class="ctx" hidden></div>
       <div id="toast" class="toast" hidden></div>
     </div>

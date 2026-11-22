@@ -2,9 +2,13 @@
 
 import { backend } from './backend.js';
 import { bboxOf, bboxIntersects, haversineKm } from './geo.js';
-import { lakeShape, scoreLake, windStats, WIND_VERSION } from './scoring.js';
+import { lakeShape, scoreLake, sunUp, windStats, WIND_VERSION } from './scoring.js';
+import { scoreSite } from './spotscore.js';
 
-export const LAKES_BASE = 'https://github.com/FredBearFin/kite-map/releases/download/lakes-v1/';
+// The lake database is built on this computer from the HydroLAKES zip
+// (see the Regions tab), and stored under lakes/<cell> and lakes/index.json.
+export const HYDROLAKES_URL = 'https://data.hydrosheds.org/file/hydrolakes/HydroLAKES_polys_v10_shp.zip';
+export const HYDROLAKES_PAGE = 'https://www.hydrosheds.org/products/hydrolakes';
 
 export function cellName(lat0, lon0) {
   const ns = lat0 >= 0 ? 'n' : 's';
@@ -32,34 +36,34 @@ async function gunzipJson(bytes) {
 }
 
 let index = null;
-export async function lakeIndex() {
-  if (index) return index;
-  index = await backend.httpJson(LAKES_BASE + 'index.json', { key: 'lakes/index.json' });
+/** The lake index, or null if the lake database has not been set up yet. */
+export async function lakeIndex({ reload = false } = {}) {
+  if (index && !reload) return index;
+  const bytes = await backend.cacheGet('lakes/index.json');
+  index = bytes ? JSON.parse(new TextDecoder().decode(bytes)) : null;
   return index;
 }
 
-/** Load one cell (downloading it if needed). Returns GeoJSON features. */
-export async function loadCell(name, { offlineOnly = false } = {}) {
-  const key = 'lakes/' + name;
-  let bytes = await backend.cacheGet(key);
-  if (!bytes) {
-    if (offlineOnly) return [];
-    const idx = await lakeIndex();
-    if (!idx.cells[name]) return [];
-    bytes = await backend.httpGet(LAKES_BASE + name + '.geojson.gz', { key });
-  }
+/** Load one cell from the local lake database. Returns GeoJSON features. */
+export async function loadCell(name) {
+  const bytes = await backend.cacheGet('lakes/' + name);
+  if (!bytes) return [];
   const fc = await gunzipJson(bytes);
   return fc.features;
 }
 
 // ---------- Wind ----------
 
-const GRID = 1; // degrees; ERA5 is 0.25 deg but 1 deg keeps downloads small
+// Wind history comes from archived forecasts of the best local weather model
+// (a few km in North America and Europe, about 10 km elsewhere), which catches
+// sea breezes, lake breezes and valley winds that the 30 km ERA5 reanalysis
+// smooths away. Spots share a 0.1 degree cell (about 10 km).
+const GRID = 0.1;
 
 export function windCellKey(lat, lon) {
   const gl = Math.round(lat / GRID) * GRID;
   const gn = Math.round(lon / GRID) * GRID;
-  return `${gl.toFixed(1)},${gn.toFixed(1)}`;
+  return `${gl.toFixed(2)},${gn.toFixed(2)}`;
 }
 
 const windMem = new Map();
@@ -74,25 +78,29 @@ export async function getWind(lat, lon) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * Download one year of hourly wind (ERA5 via Open-Meteo) for grid points and
+ * Download one year of hourly wind (high-resolution archived forecasts via
+ * Open-Meteo) for grid points and
  * save kiteable-hour stats. Points already saved are skipped.
  */
-export async function downloadWind(points, onProgress, signal) {
+export async function downloadWind(points, onProgress, signal, { retries = 4 } = {}) {
   const todo = [];
   for (const k of points) {
     const w = await backend.kvGet('wind/' + k);
     if (!w || (w.v ?? 1) < WIND_VERSION) todo.push(k);
   }
+  // The last three full years, so one unusually windy or calm year doesn't
+  // decide a spot's score.
+  const YEARS = 3;
   const year = new Date().getUTCFullYear() - 1;
-  const batch = 8;
+  const batch = 4;
   for (let i = 0; i < todo.length; i += batch) {
     if (signal?.aborted) throw new Error('cancelled');
     const part = todo.slice(i, i + batch);
     const lats = part.map((k) => k.split(',')[0]).join(',');
     const lons = part.map((k) => k.split(',')[1]).join(',');
     const url =
-      `https://archive-api.open-meteo.com/v1/archive?latitude=${lats}&longitude=${lons}` +
-      `&start_date=${year}-01-01&end_date=${year}-12-31` +
+      `https://historical-forecast-api.open-meteo.com/v1/forecast?latitude=${lats}&longitude=${lons}` +
+      `&start_date=${year - YEARS + 1}-01-01&end_date=${year}-12-31` +
       `&hourly=wind_speed_10m,wind_direction_10m,temperature_2m&wind_speed_unit=kn&timezone=auto&timeformat=unixtime`;
     let res;
     for (let attempt = 0; ; attempt++) {
@@ -100,7 +108,7 @@ export async function downloadWind(points, onProgress, signal) {
         res = await backend.httpJson(url);
         break;
       } catch (e) {
-        if (attempt >= 4 || signal?.aborted) throw e;
+        if (attempt >= retries || signal?.aborted) throw e;
         onProgress?.(i, todo.length, 'Wind service is busy, waiting a minute...');
         await sleep(60000);
       }
@@ -110,11 +118,14 @@ export async function downloadWind(points, onProgress, signal) {
       const r = list[j];
       if (!r?.hourly) continue;
       const off = r.utc_offset_seconds || 0;
-      const local = r.hourly.time.map((t) => new Date((t + off) * 1000));
-      const hours = local.map((d) => d.getUTCHours());
-      const months = local.map((d) => d.getUTCMonth());
-      const stats = windStats(r.hourly.wind_speed_10m, r.hourly.wind_direction_10m, hours, 1, months, r.hourly.temperature_2m);
+      const [plat, plon] = part[j].split(',').map(Number);
+      // Daylight from the sun's position at mid-hour: real sunrise and sunset
+      // through the year, with no time zone or daylight saving rules.
+      const day = r.hourly.time.map((t) => sunUp(t + 1800, plat, plon));
+      const months = r.hourly.time.map((t) => new Date((t + off) * 1000).getUTCMonth());
+      const stats = windStats(r.hourly.wind_speed_10m, r.hourly.wind_direction_10m, day, YEARS, months, r.hourly.temperature_2m);
       stats.year = year;
+      stats.years = YEARS;
       windMem.set(part[j], stats);
       await backend.kvSet('wind/' + part[j], stats);
     }
@@ -138,7 +149,12 @@ export async function forecastMany(points) {
       `https://api.open-meteo.com/v1/forecast?latitude=${part.map((p) => p[0].toFixed(3)).join(',')}` +
       `&longitude=${part.map((p) => p[1].toFixed(3)).join(',')}` +
       `&hourly=wind_speed_10m,wind_gusts_10m,wind_direction_10m,temperature_2m&wind_speed_unit=kn&timezone=auto&forecast_days=7`;
-    const r = await backend.httpJson(url, { refresh: true });
+    // The forecast service sometimes times out: try a few times.
+    let r, err;
+    for (let k = 0; k < 3 && !r; k++) {
+      try { r = await backend.httpJson(url, { refresh: true }); } catch (e) { err = e; await sleep(3000 * (k + 1)); }
+    }
+    if (!r) throw err;
     out.push(...(Array.isArray(r) ? r : [r]));
   }
   return out;
@@ -168,13 +184,27 @@ export function lakeCenter(f) {
   return p._c;
 }
 
+// Shore analyses of lakes (site.js), by lake id. Lakes with one are scored
+// from it; the others get the quick shape-only estimate.
+export const lakeSites = new Map();
+
 export async function scoreFeatures(features, mode = 'water') {
+  let n = 0;
   for (const f of features) {
+    // Let the window repaint while scoring thousands of lakes.
+    if (++n % 400 === 0) await new Promise((r) => setTimeout(r, 0));
     const [lon, lat] = lakeCenter(f);
     const fetch8 = lakeShape(f);
     const wind = await getWind(lat, lon);
+    const site = lakeSites.get(f.properties.id);
+    if (site?.ok) {
+      const s = scoreSite(site, wind, mode, f.properties);
+      Object.assign(f.properties, { score: s.score, eff: s.eff, basis: s.basis, detail: 1 });
+      f.properties._suit = s.Q;
+      continue;
+    }
     const s = scoreLake(fetch8, wind, mode, f.properties);
-    Object.assign(f.properties, { score: s.score, eff: s.effHours, basis: s.basis });
+    Object.assign(f.properties, { score: s.score, eff: s.effHours, basis: s.basis, detail: 0 });
     f.properties._suit = s.suit;
   }
 }
