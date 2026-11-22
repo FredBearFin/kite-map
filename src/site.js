@@ -8,10 +8,13 @@
 //   - the wind shadow of trees, buildings and hills on the upwind shore
 //   - how much water there is to ride back and forth across the wind
 //   - how far the launch is from a road
+//   - how deep the water is off the launch, where the terrain data has sea-floor
+//     depths (most coasts): shallow flats you can stand on make even offshore
+//     wind workable, as on the big lagoons
 // Pure functions with no browser APIs, shared by the app and the calibration
 // script (tools/calibrate.mjs).
 
-export const SITE_VERSION = 1;
+export const SITE_VERSION = 2;
 
 // How far behind an obstacle the wind stays gusty and weak, in multiples of its
 // height. Kiting guides give 7 to 20 times; 10 is a common middle value. Hills
@@ -269,6 +272,29 @@ export function analyzeSite(input) {
     return demCache[i] - waterElev;
   };
 
+  // Depth off the shore. The terrain tiles carry sea-floor depths on most
+  // coasts (below sea level), but lakes only show their surface. Depths count
+  // only where the water body shows real depths somewhere.
+  const seaLevel = waterElev != null && waterElev < 15 ? 0 : waterElev;
+  const depthAt = (x, y) => {
+    if (!input.dem || seaLevel == null) return null;
+    const v = input.dem(g.lon(x), g.lat(y));
+    return v == null || !isFinite(v) ? null : seaLevel - v;
+  };
+  let bathy = false;
+  if (input.dem && seaLevel != null) {
+    let n = 0, deep = 0;
+    const stepI = Math.max(1, Math.floor(N / 4000));
+    for (let i = 0; i < N; i += stepI) {
+      if (!comp[i]) continue;
+      const dd = depthAt((i % g.nx) + 0.5, ((i / g.nx) | 0) + 0.5);
+      if (dd == null) continue;
+      n++;
+      if (dd > 0.5) deep++;
+    }
+    bathy = n > 20 && deep / n > 0.1;
+  }
+
   const maxFetch = input.maxFetch || 15000;
   const step = 0.5;
   const at = (x, y) => (x < 0 || y < 0 || x >= g.nx || y >= g.ny ? -1 : Math.floor(y) * g.nx + Math.floor(x));
@@ -335,6 +361,17 @@ export function analyzeSite(input) {
       dirs.push([th, Math.round(up.d), up.open ? 1 : 0, Math.round(sh), src, shH, Math.round(reach)]);
     }
     const c = { lon: +g.lon(cx).toFixed(5), lat: +g.lat(cy).toFixed(5), face: toCompass((Math.atan2(-ne, -nn) * 180) / Math.PI), access, dirs };
+    if (bathy) {
+      // Depth 150, 300 and 600 m out from the shore (m, 0 when the data shows
+      // none), so standable flats can be told from a drop-off.
+      c.depth = [150, 300, 600].map((off) => {
+        const ox = cx - (ne * off) / g.cell, oy = cy + (nn * off) / g.cell;
+        const j = at(ox, oy);
+        if (j < 0 || !water[j]) return null;
+        const dd = depthAt(ox, oy);
+        return dd == null ? null : Math.max(0, Math.round(dd * 10) / 10);
+      });
+    }
     if (water[i] === 2) {
       c.river = 1;
       // Channel width: shortest water crossing through this bank point.
@@ -352,6 +389,7 @@ export function analyzeSite(input) {
     waterFromLake,
     roadsKnown,
     waterElev: waterElev == null ? null : Math.round(waterElev),
+    bathy,
     cand,
   };
 }
@@ -361,6 +399,11 @@ export function analyzeSite(input) {
 export const PARAMS = {
   // Wind angle to the shore: 0 = straight onshore, 90 = side-shore, 180 = offshore.
   angle: [[15, 0.7], [65, 1], [95, 0.9], [110, 0.4], [130, 0.1], [181, 0]],
+  // On flats you can stand on, offshore wind is far less dangerous: if you
+  // drop the kite you walk back. Standable: up to shallowMax m deep 150 and
+  // 300 m out.
+  shallowAngle: [[15, 0.7], [65, 1], [95, 0.95], [110, 0.85], [130, 0.65], [181, 0.45]],
+  shallowMax: 1.6,
   // Clean wind over water: below cleanMin m it is too gusty to use; beyond
   // that it gets steadier, about 63% of the way there after cleanScale m.
   cleanMin: 100,
@@ -376,9 +419,15 @@ export const PARAMS = {
   top: 2,
 };
 
-export function angleFactor(th, P = PARAMS) {
-  for (const [lim, f] of P.angle) if (th <= lim) return f;
+export function angleFactor(th, P = PARAMS, shallow = false) {
+  for (const [lim, f] of shallow && P.shallowAngle ? P.shallowAngle : P.angle) if (th <= lim) return f;
   return 0;
+}
+
+/** True when the water off this launch is shallow enough to stand in. */
+export function isShallow(c, P = PARAMS) {
+  const d = c.depth;
+  return !!d && d[0] != null && d[1] != null && d[0] <= P.shallowMax && d[1] <= P.shallowMax;
 }
 
 /** Score each launch candidate for each direction. Returns { Q[16], best[16] }. */
@@ -391,12 +440,13 @@ export function rate(raw, P = PARAMS) {
     raw.cand.forEach((c, ci) => {
       const [th, W, open, sh, src, shH, reach] = c.dirs[d];
       const clean = open ? Math.max(W, P.cleanOpen) : W - sh;
-      const fa = angleFactor(th, P);
+      const shallow = isShallow(c, P);
+      const fa = angleFactor(th, P, shallow);
       const fc = clean <= P.cleanMin ? 0 : 1 - Math.exp(-(clean - P.cleanMin) / P.cleanScale);
       const fr = 1 - Math.exp(-reach / P.reachScale);
       const fx = c.access == null ? 1 : c.access <= P.accessNear ? 1 : c.access <= P.accessFar ? P.accessFarF : P.accessNoneF;
       const q = fa * fc * Math.sqrt(fr) * fx * (c.river ? P.river : 1);
-      qs.push({ ci, q, fa, fc, fr, fx, th, W, open, sh, src, shH, reach, clean });
+      qs.push({ ci, q, fa, fc, fr, fx, th, W, open, sh, src, shH, reach, clean, shallow });
     });
     qs.sort((a, b) => b.q - a.q);
     const top = qs.slice(0, P.top);

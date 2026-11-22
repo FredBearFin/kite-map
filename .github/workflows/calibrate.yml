@@ -10,7 +10,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        source: [era5, hires]
+        include:
+          - { name: before, source: era5, grid: "0.25", nodepth: "1" }
+          - { name: after, source: hires, grid: "0", nodepth: "" }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -20,9 +22,10 @@ jobs:
       - run: npm ci
       - run: node tools/calibrate.mjs calibration.json
         env:
-          WIND_GRID: ${{ matrix.source == 'hires' && '0' || '0.25' }}
+          WIND_GRID: ${{ matrix.grid }}
           WIND_SOURCE: ${{ matrix.source }}
+          NO_DEPTH: ${{ matrix.nodepth }}
       - uses: actions/upload-artifact@v4
         with:
-          name: calibration-${{ matrix.source }}
+          name: calibration-${{ matrix.name }}
           path: calibration.json

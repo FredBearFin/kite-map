@@ -2,11 +2,11 @@
 // and explain the score in plain words.
 
 import { DIRS16 } from './geo.js';
-import { PARAMS, SOURCE_NAMES, rate } from './site.js';
+import { PARAMS, SOURCE_NAMES, isShallow, rate } from './site.js';
 import { iceMonths, shallowFactor, waterFactor } from './scoring.js';
 
 // On ice the launch angle hardly matters: you can walk out anywhere.
-export const SNOW_PARAMS = { ...PARAMS, angle: [[181, 1]] };
+export const SNOW_PARAMS = { ...PARAMS, angle: [[181, 1]], shallowAngle: [[181, 1]] };
 
 // Effective hours at which the score reaches about 63 (1 - 1/e).
 export const SCALE = { water: 370, beginner: 240, snow: 150 };
@@ -109,7 +109,12 @@ export function explain(s, raw, mode = 'water', props = {}) {
   if (props.wc === 'green') out.push({ kind: 'bad', text: 'Green water on satellite: algae likely (score lowered).' });
   if (props.wc === 'murky') out.push({ kind: 'bad', text: 'Brown, murky water on satellite (score lowered).' });
   if (raw.waterFromLake) out.push({ kind: 'info', text: 'Map detail is not saved here, so the coarse HydroLAKES outline was used.' });
-  out.push({ kind: 'info', text: 'Offshore launches are only safe on shallow flats you can stand on; depth is not known here, so they are scored low.' });
+  // Depth off the launches, where the terrain data has sea-floor depths.
+  const shallowN = raw.cand.filter((c) => isShallow(c)).length;
+  if (top && c && isShallow(c)) out.push({ kind: 'good', text: `Shallow water off the best launch (about ${c.depth[0]} m deep 150 m out, ${c.depth[1]} m at 300 m): you can stand up, so even side-offshore wind is workable.` });
+  else if (shallowN) out.push({ kind: 'info', text: `${shallowN} of ${raw.cand.length} launch points here have water shallow enough to stand in.` });
+  else if (raw.bathy && c?.depth?.[0] != null) out.push({ kind: 'info', text: `Water gets deep quickly off the best launch (about ${c.depth[0]} m deep 150 m out).` });
+  if (!raw.bathy) out.push({ kind: 'info', text: 'Offshore launches are only safe on shallow flats you can stand on; depth is not known here, so they are scored low.' });
   return out;
 }
 
