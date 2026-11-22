@@ -34,7 +34,7 @@ test('wind stats and score', () => {
   assert.equal(w.kiteHours, 2);
   assert.equal(w.byDir[12], 2);
   const s = scoreLake(fetchByAxis(rect), { kiteHours: 500, byDir: Array(16).fill(0).map((_, i) => (i === 12 ? 500 : 0)) });
-  assert.ok(s.score > 70, `score ${s.score}`);
+  assert.ok(s.score > 55, `score ${s.score}`);
 });
 
 test('tile and distance math', () => {
@@ -68,6 +68,8 @@ test('green or very shallow water scores lower; deep clear water is not penalise
   assert.ok(clearDeep > scoreLake(f, w, 'water', { d: 0.8, wc: 'clear' }).score);
   assert.ok(clearDeep > scoreLake(f, w, 'water', { d: 12, wc: 'green' }).score);
   assert.equal(shallowFactor(12), 1);
+  assert.equal(shallowFactor(1, "beginner"), 1.1);
+  assert.equal(shallowFactor(1), 0.85);
   assert.ok(scoreLake(f, w, 'beginner', { d: 12 }).effHours < scoreLake(f, w, 'water', { d: 12 }).effHours);
 });
 
@@ -81,4 +83,11 @@ test('day verdicts and drive estimate', () => {
   assert.equal(dayVerdict(north, null).verdict, 'go');
   const h = estimateDriveHours(266); // Omaha to Kansas City, about 3 h by road
   assert.ok(h > 2.8 && h < 3.6, String(h));
+});
+
+import { sunUp } from '../src/scoring.js';
+test('sun: Omaha noon in June is day, 6 pm in December is night', () => {
+  assert.equal(sunUp(Date.UTC(2025, 5, 21, 18) / 1000, 41.26, -95.94), true); // 1 pm CDT
+  assert.equal(sunUp(Date.UTC(2025, 11, 21, 0) / 1000, 41.26, -95.94), false); // 6 pm CST
+  assert.equal(sunUp(Date.UTC(2025, 5, 22, 1, 30) / 1000, 41.26, -95.94), true); // 8:30 pm CDT, still light
 });

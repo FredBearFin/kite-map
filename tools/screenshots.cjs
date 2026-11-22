@@ -5,7 +5,11 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 
 const out = process.argv[2] || 'screenshots';
-const PLACE = { name: 'lake-mcconaughy', center: [-101.74, 41.235], zoom: 11.3 };
+// Scenes: a coast first (sound-side flats on the Outer Banks), then a second
+// coast for the access check. Neither is special to the app: it scans
+// whatever water is in view.
+const PLACE = { name: 'outer-banks', center: [-75.56, 35.26], zoom: 11.6 };
+const PLACE2 = { name: 'tarifa', center: [-5.66, 36.04], zoom: 11.8 };
 
 // Wait until the camera has stopped and every tile (terrain too) has drawn.
 async function waitIdle(page, ms = 240000) {
@@ -104,13 +108,14 @@ async function snap3d(page, path) {
 
   // A lake lined with houses, where access matters: the spots get amber or
   // red rings and lower scores where the shore is private.
-  await page.evaluate(() => { document.querySelector('#tabs button[data-tab="spots"]').click(); window.__kite.state.fcDay = null; window.__kite.map.jumpTo({ center: [-95.16, 43.37], zoom: 12.2 }); });
+  await page.evaluate((p) => { window.__P2 = p; }, PLACE2);
+  await page.evaluate(() => { document.querySelector('#tabs button[data-tab="spots"]').click(); window.__kite.state.fcDay = null; window.__kite.map.jumpTo({ center: window.__P2.center, zoom: window.__P2.zoom }); });
   await page.waitForTimeout(5000);
   const inView = () => { const b = window.__kite.map.getBounds(); return window.__kite.state.spots.filter((s) => b.contains([s.c.lon, s.c.lat])); };
-  await page.waitForFunction(`(${inView})().length >= 6 && document.getElementById('banner').hidden`, null, { timeout: 420000, polling: 3000 }).catch(() => console.log('okoboji scan slow'));
-  await page.waitForFunction(`(${inView})().every((s) => s.access)`, null, { timeout: 240000, polling: 3000 }).catch(() => console.log('okoboji access slow'));
+  await page.waitForFunction(`(${inView})().length >= 6 && document.getElementById('banner').hidden`, null, { timeout: 420000, polling: 3000 }).catch(() => console.log('scene2 scan slow'));
+  await page.waitForFunction(`(${inView})().every((s) => s.access)`, null, { timeout: 240000, polling: 3000 }).catch(() => console.log('scene2 access slow'));
   await page.waitForTimeout(5000);
-  console.log('okoboji access', JSON.stringify(await page.evaluate(`(${inView})().map((s) => s.score + '/' + s.base + ' ' + s.access?.level + ' ' + s.access?.items.map((i) => i.kind).join('/'))`)));
+  console.log('scene2 access', JSON.stringify(await page.evaluate(`(${inView})().map((s) => s.score + '/' + s.base + ' ' + s.access?.level + ' ' + s.access?.items.map((i) => i.kind).join('/'))`)));
   await page.screenshot({ path: `${out}/6-access-map.png` });
   const lim = await page.evaluate(`(() => { const v = (${inView})(); const s = v.find((x) => x.access && x.access.level !== 'public') || v.find((x) => x.access && x.access.factor < 1); return s ? window.__kite.state.spots.indexOf(s) : -1; })()`);
   if (lim >= 0) {

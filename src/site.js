@@ -433,10 +433,10 @@ export const PARAMS = {
   // Clean wind over water: below cleanMin m it is too gusty to use; beyond
   // that it gets steadier, about 63% of the way there after cleanScale m.
   cleanMin: 100,
-  cleanScale: 1000,
-  cleanOpen: 3000, // what open sea or water past the edge of the map counts as
+  cleanScale: 2500,
+  cleanOpen: 8000, // what open sea or water past the edge of the map counts as
   // Water to ride across the wind, same shape.
-  reachScale: 900,
+  reachScale: 2000,
   river: 0.85, // current, barges, snags and sandbars
   accessNear: 300,
   accessFar: 800,

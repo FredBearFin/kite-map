@@ -10,12 +10,15 @@ import { PMTiles } from 'pmtiles';
 import { PNG } from 'pngjs';
 import { analyzeSite } from '../src/site.js';
 import { gatherInputs } from '../src/sitegather.js';
-import { windStats } from '../src/scoring.js';
+import { sunUp, windStats } from '../src/scoring.js';
 import { scoreSite, explain } from '../src/spotscore.js';
 import { PARAMS } from '../src/site.js';
 
-// NO_DEPTH=1 scores without the sea-floor depth (the old model), for before/after.
-if (process.env.NO_DEPTH) PARAMS.shallowAngle = null;
+// NO_DEPTH=1 runs the old model (v0.5) for before/after: no sea-floor depth,
+// no shore type, the old fetch and reach curves and the old score curve.
+const OLD = !!process.env.NO_DEPTH;
+if (OLD) Object.assign(PARAMS, { shallowAngle: null, cleanScale: 1000, cleanOpen: 3000, reachScale: 900, shoreCliff: 1, shoreBank: 1, shoreRock: 1, shoreBuilt: 1 });
+const oldScore = (eff) => Math.round(100 * (1 - Math.exp(-eff / 370)));
 
 // expect: 'good' = established kite spot, 'poor' = not a kite spot.
 const PLACES = [
@@ -67,7 +70,7 @@ const PLACES = [
   { name: 'Mississippi River at St. Louis, MO', lat: 38.63, lon: -90.18, expect: 'poor', coast: true },
   // Lakes: small, narrow, wooded, urban or busy.
   { name: 'Lake of the Isles, MN', lat: 44.956, lon: -93.308, expect: 'poor' },
-  { name: 'Lake Cunningham, NE', lat: 41.34, lon: -96.06, expect: 'poor' },
+  { name: 'Lake Cunningham, NE', lat: 41.338, lon: -96.073, expect: 'poor' },
   { name: 'Zorinsky Lake, NE', lat: 41.24, lon: -96.18, expect: 'poor' },
   { name: 'Walden Pond, MA', lat: 42.44, lon: -71.337, expect: 'poor' },
   { name: 'Central Park Reservoir, NY', lat: 40.785, lon: -73.962, expect: 'poor' },
@@ -99,7 +102,8 @@ async function getWind(lat, lon, grid = 1) {
   const year = new Date().getUTCFullYear() - 1;
   const glat = grid ? Math.round(lat / grid) * grid : lat, glon = grid ? Math.round(lon / grid) * grid : lon;
   const host = SOURCE === 'hires' ? 'https://historical-forecast-api.open-meteo.com/v1/forecast' : 'https://archive-api.open-meteo.com/v1/archive';
-  const url = `${host}?latitude=${glat.toFixed(4)}&longitude=${glon.toFixed(4)}&start_date=${year}-01-01&end_date=${year}-12-31` +
+  const YEARS = SOURCE === 'hires' ? 3 : 1;
+  const url = `${host}?latitude=${glat.toFixed(4)}&longitude=${glon.toFixed(4)}&start_date=${year - YEARS + 1}-01-01&end_date=${year}-12-31` +
     `&hourly=wind_speed_10m,wind_direction_10m,temperature_2m&wind_speed_unit=kn&timezone=auto&timeformat=unixtime`;
   for (let a = 0; a < 4; a++) {
     // A network hiccup throws instead of returning an error status: retry it too.
@@ -109,7 +113,9 @@ async function getWind(lat, lon, grid = 1) {
       const j = await r.json();
       const off = j.utc_offset_seconds || 0;
       const local = j.hourly.time.map((t) => new Date((t + off) * 1000));
-      return windStats(j.hourly.wind_speed_10m, j.hourly.wind_direction_10m, local.map((d) => d.getUTCHours()), 1, local.map((d) => d.getUTCMonth()), j.hourly.temperature_2m);
+      // Old model: 9am to 8pm local, one year. New: real daylight, three years.
+      const day = SOURCE === 'hires' ? j.hourly.time.map((t) => sunUp(t + 1800, glat, glon)) : local.map((d) => d.getUTCHours());
+      return windStats(j.hourly.wind_speed_10m, j.hourly.wind_direction_10m, day, YEARS, local.map((d) => d.getUTCMonth()), j.hourly.temperature_2m);
     }
     await new Promise((r) => setTimeout(r, 20000));
   }
@@ -142,6 +148,7 @@ for (const p of PLACES) {
   console.log(`  ${SOURCE} wind kiteable h/yr: ${wind?.kiteHours}`);
   const s = scoreSite(raw, wind, 'water');
   const sb = scoreSite(raw, wind, 'beginner');
+  if (OLD && s.eff != null) { s.score = oldScore(s.eff); sb.score = Math.round(100 * (1 - Math.exp(-sb.eff / 240))); }
   results.push({ ...p, raw, wind, score: s.score, beginner: sb.score });
   const shallowN = raw.cand?.filter((c) => c.depth && c.depth[0] != null && c.depth[0] <= 1.6 && c.depth[1] <= 1.6).length ?? 0;
   console.log(`\n${p.name} [${p.expect}] score ${s.score} (beginner ${sb.score}), ${raw.cand?.length ?? 0} launch points, water ${raw.waterKm2} km2, depth data ${raw.bathy ? 'yes' : 'no'}, shallow launches ${shallowN}, ${((Date.now() - t0) / 1000).toFixed(1)} s`);
@@ -155,6 +162,8 @@ let wins = 0;
 for (const g of good) for (const b of poor) wins += g.score > b.score ? 1 : g.score === b.score ? 0.5 : 0;
 const ranking = wins / (good.length * poor.length);
 const right = results.filter((r) => (r.expect === 'good') === (r.score >= 50)).length;
+const med = (a) => { const b = a.map((r) => r.score).sort((x, y) => x - y); return b[Math.floor(b.length / 2)]; };
+console.log(`\nSPREAD: real spots median ${med(good)}, ${good.filter((r) => r.score >= 90).length} of ${good.length} score 90+; non-spots median ${med(poor)}`);
 console.log(`\nACCURACY ${SOURCE}${process.env.NO_DEPTH ? ' no-depth' : ''}: ranking ${(100 * ranking).toFixed(1)}% (a real spot beats a non-spot), ${right} of ${results.length} on the right side of 50`);
 for (const [label, f] of [['coasts', (r) => r.coast], ['lakes', (r) => !r.coast]]) {
   const G = good.filter(f), B = poor.filter(f);

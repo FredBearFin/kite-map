@@ -2,7 +2,7 @@
 
 import { backend } from './backend.js';
 import { bboxOf, bboxIntersects, haversineKm } from './geo.js';
-import { lakeShape, scoreLake, windStats, WIND_VERSION } from './scoring.js';
+import { lakeShape, scoreLake, sunUp, windStats, WIND_VERSION } from './scoring.js';
 import { scoreSite } from './spotscore.js';
 
 // The lake database is built on this computer from the HydroLAKES zip
@@ -88,8 +88,11 @@ export async function downloadWind(points, onProgress, signal, { retries = 4 } =
     const w = await backend.kvGet('wind/' + k);
     if (!w || (w.v ?? 1) < WIND_VERSION) todo.push(k);
   }
+  // The last three full years, so one unusually windy or calm year doesn't
+  // decide a spot's score.
+  const YEARS = 3;
   const year = new Date().getUTCFullYear() - 1;
-  const batch = 8;
+  const batch = 4;
   for (let i = 0; i < todo.length; i += batch) {
     if (signal?.aborted) throw new Error('cancelled');
     const part = todo.slice(i, i + batch);
@@ -97,7 +100,7 @@ export async function downloadWind(points, onProgress, signal, { retries = 4 } =
     const lons = part.map((k) => k.split(',')[1]).join(',');
     const url =
       `https://historical-forecast-api.open-meteo.com/v1/forecast?latitude=${lats}&longitude=${lons}` +
-      `&start_date=${year}-01-01&end_date=${year}-12-31` +
+      `&start_date=${year - YEARS + 1}-01-01&end_date=${year}-12-31` +
       `&hourly=wind_speed_10m,wind_direction_10m,temperature_2m&wind_speed_unit=kn&timezone=auto&timeformat=unixtime`;
     let res;
     for (let attempt = 0; ; attempt++) {
@@ -115,11 +118,14 @@ export async function downloadWind(points, onProgress, signal, { retries = 4 } =
       const r = list[j];
       if (!r?.hourly) continue;
       const off = r.utc_offset_seconds || 0;
-      const local = r.hourly.time.map((t) => new Date((t + off) * 1000));
-      const hours = local.map((d) => d.getUTCHours());
-      const months = local.map((d) => d.getUTCMonth());
-      const stats = windStats(r.hourly.wind_speed_10m, r.hourly.wind_direction_10m, hours, 1, months, r.hourly.temperature_2m);
+      const [plat, plon] = part[j].split(',').map(Number);
+      // Daylight from the sun's position at mid-hour: real sunrise and sunset
+      // through the year, with no time zone or daylight saving rules.
+      const day = r.hourly.time.map((t) => sunUp(t + 1800, plat, plon));
+      const months = r.hourly.time.map((t) => new Date((t + off) * 1000).getUTCMonth());
+      const stats = windStats(r.hourly.wind_speed_10m, r.hourly.wind_direction_10m, day, YEARS, months, r.hourly.temperature_2m);
       stats.year = year;
+      stats.years = YEARS;
       windMem.set(part[j], stats);
       await backend.kvSet('wind/' + part[j], stats);
     }

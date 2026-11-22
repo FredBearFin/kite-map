@@ -3,15 +3,13 @@
 
 import { DIRS16 } from './geo.js';
 import { PARAMS, SOURCE_NAMES, isShallow, rate, shoreFactor } from './site.js';
-import { iceMonths, shallowFactor, waterFactor } from './scoring.js';
+import { iceMonths, shallowFactor, toScore, waterFactor } from './scoring.js';
 
 // On ice the launch angle hardly matters: you can walk out anywhere.
 export const SNOW_PARAMS = { ...PARAMS, angle: [[181, 1]], shallowAngle: [[181, 1]] };
 
-// Effective hours at which the score reaches about 63 (1 - 1/e).
-export const SCALE = { water: 370, beginner: 240, snow: 150 };
-
-const toScore = (eff, scale) => Math.round(100 * (1 - Math.exp(-eff / scale)));
+// Effective hours that score 50 (see toScore in scoring.js).
+export const SCALE = { water: 220, beginner: 150, snow: 80 };
 
 export function angleWord(th) {
   if (th < 15) return 'onshore';
@@ -52,10 +50,10 @@ export function scoreSite(raw, wind, mode = 'water', props = {}) {
   const P = mode === 'snow' ? SNOW_PARAMS : PARAMS;
   const { Q, best } = rate(raw, P);
   const hours = hoursFor(wind, mode);
-  const quality = shallowFactor(props.d) * waterFactor(props.wc);
+  const quality = shallowFactor(props.d, mode) * waterFactor(props.wc);
   if (!hours) {
     const mean = Q.reduce((a, b) => a + b, 0) / 16;
-    return { score: Math.round(mean * 50 * quality), Q, best, eff: null, total: null, basis: 'shape', quality };
+    return { score: Math.min(100, Math.round(mean * 50 * quality)), Q, best, eff: null, total: null, basis: 'shape', quality };
   }
   const total = hours.reduce((a, b) => a + b, 0);
   const eff = hours.reduce((s, h, d) => s + h * Q[d], 0) * quality;
@@ -113,7 +111,9 @@ export function explain(s, raw, mode = 'water', props = {}) {
   if (c?.bridge != null) out.push({ kind: 'warn', text: `Bridge or causeway ${fmtM(c.bridge)} from the best launch: stay well clear.` });
   if (c && c.access != null && c.access > 800) out.push({ kind: 'warn', text: `Best launch is ${fmtM(c.access)} from the nearest road.` });
   if (!raw.roadsKnown) out.push({ kind: 'info', text: 'Road access unknown (no map detail saved here).' });
-  if (props.d != null && props.d < 1.5) out.push({ kind: 'bad', text: `Average depth ${props.d} m: likely weedy or mucky (score lowered).` });
+  if (props.d != null && props.d < 1.5) out.push(mode === 'beginner'
+    ? { kind: 'good', text: `Average depth ${props.d} m: shallow water you can stand in, good for learning (estimate for small lakes).` }
+    : { kind: 'warn', text: `Average depth ${props.d} m: may be weedy or mucky (score lowered a little; estimate for small lakes).` });
   if (props.wc === 'green') out.push({ kind: 'bad', text: 'Green water on satellite: algae likely (score lowered).' });
   if (props.wc === 'murky') out.push({ kind: 'bad', text: 'Brown, murky water on satellite (score lowered).' });
   if (raw.waterFromLake) out.push({ kind: 'info', text: 'Map detail is not saved here, so the coarse HydroLAKES outline was used.' });
