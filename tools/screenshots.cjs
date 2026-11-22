@@ -26,8 +26,9 @@ async function waitIdle(page, ms = 240000) {
 (async () => {
   fs.mkdirSync(out, { recursive: true });
   const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
-  const DPR = +(process.env.DPR || 2);
-  const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: DPR });
+  // 1x: the CI machine draws 3D terrain in software, and 2x takes minutes per frame.
+  const DPR = +(process.env.DPR || 1);
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: DPR });
   page.on('console', (m) => ['error', 'warning'].includes(m.type()) && console.log('console:', m.text().slice(0, 200)));
   page.on('pageerror', (e) => console.log('pageerror:', String(e).slice(0, 300)));
   await page.goto('http://localhost:4173');
