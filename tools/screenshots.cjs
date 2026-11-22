@@ -73,13 +73,43 @@ async function snap3d(page, path) {
   await page.screenshot({ path: `${out}/2-spot-popup.png` });
 
   await page.evaluate(() => window.__kite.spotView(0));
+  await page.evaluate(() => window.__kite.sv.pause());
   await waitIdle(page);
-  await snap3d(page, `${out}/3-spot-3d.png`);
 
-  // Look around: turn right and show another wind direction.
-  await page.evaluate(() => document.querySelectorAll('#sv-panel .sv-dirs button')[1]?.click());
+  // One picture per guide step, at a moment where the rider is mid-action.
+  const STEP_T = { wind: 4, launch: 7, ride: 5, upwind: 9, land: 6, bail: 7 };
+  const keys = await page.evaluate(() => window.__kite.sv.steps);
+  for (let i = 0; i < keys.length; i++) {
+    await page.evaluate(({ i, t }) => { window.__kite.sv.step(i); window.__kite.sv.pause(); window.__kite.sv.setTime(t); }, { i, t: STEP_T[keys[i]] });
+    await waitIdle(page);
+    await snap3d(page, `${out}/${3 + i}-step-${i + 1}-${keys[i]}.png`);
+  }
+
+  // Another wind direction and a strong wind, on the riding step.
+  await page.evaluate(() => { const c = window.__kite.sv; c.step(2); c.pause(); c.speed(28); });
+  await page.evaluate(() => { const b = document.querySelectorAll('#sv-panel .sv-dirs button')[1]; if (b) b.click(); window.__kite.sv.pause(); window.__kite.sv.setTime(5); });
   await waitIdle(page);
-  await snap3d(page, `${out}/4-spot-3d-other-wind.png`);
-  console.log('3d', await page.evaluate(() => { const m = window.__kite.map; return JSON.stringify({ pitch: m.getPitch(), zoom: m.getZoom(), elev: m.transform?.elevation }); }));
+  await snap3d(page, `${out}/9-other-wind-strong.png`);
+
+  // Animation frames for GIFs: the map canvas only, drawn at exact moments.
+  async function frames(name, step, t0, t1, n) {
+    fs.mkdirSync(`${out}/frames-${name}`, { recursive: true });
+    await page.evaluate((i) => { const c = window.__kite.sv; c.speed(18); c.step(i); c.pause(); }, step);
+    await waitIdle(page);
+    for (let k = 0; k < n; k++) {
+      const url = await page.evaluate((t) => new Promise((res) => {
+        const m = window.__kite.map;
+        window.__kite.sv.setTime(t);
+        let done = false;
+        const grab = () => { if (done) return; done = true; m.once('render', () => res(m.getCanvas().toDataURL('image/png'))); m.triggerRepaint(); };
+        m.once('idle', grab);
+        setTimeout(grab, 20000);
+      }), t0 + ((t1 - t0) * k) / n);
+      fs.writeFileSync(`${out}/frames-${name}/${String(k).padStart(3, '0')}.png`, Buffer.from(url.split(',')[1], 'base64'));
+    }
+    console.log('frames', name, n);
+  }
+  await frames('ride', 2, 0, 9, 30);
+  await frames('launch', 1, 0, 14, 28);
   await browser.close();
 })();

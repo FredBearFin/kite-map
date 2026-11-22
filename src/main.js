@@ -9,7 +9,7 @@ import { registerProtocol, glyphsTemplate, assetUrl, ASSETS, status, tileTemplat
 import { HYDROLAKES_PAGE, HYDROLAKES_URL, lakeIndex, lakeSites, downloadWind, windCellKey, cellsFor, distanceFromHome, driveRoute, filterBbox, forecast, forecastMany, getWind, lakeCenter, loadCell, pointInLake, scoreFeatures } from './lakes.js';
 import { analyzeLake, analyzePoint, boxesIn, pickSpots, scanBox } from './siteapp.js';
 import { explain, launches, scoreSite, angleWord } from './spotscore.js';
-import { enterSpotView } from './spotview.js';
+import { enterSpotView, spotViewControl } from './spotview.js';
 import { attachWaterColors } from './watercolor.js';
 import { downloadRegion, estimate, DEFAULTS } from './download.js';
 
@@ -1281,6 +1281,7 @@ function toast(msg, ms = 4000) {
 }
 
 window.__kite = {
+  sv: spotViewControl,
   state, map, status, backend,
   // Used by tools/screenshots.cjs to show a discovered spot.
   spotPopup: (i = 0) => { const sp = state.spots[i]; if (sp) showSpotPopup(sp.raw, sp.c.lon, sp.c.lat, 'Launch spot'); },

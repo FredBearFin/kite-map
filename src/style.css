@@ -91,7 +91,7 @@ ul.why li span { flex: none; width: 12px; text-align: center; }
 .why-info span { color: #5b6b7c; }
 
 /* 3D spot view */
-#sv-panel { position: absolute; top: 10px; left: 10px; z-index: 5; width: 330px; max-height: calc(100% - 20px); overflow: auto;
+#sv-panel { position: absolute; top: 10px; left: 10px; z-index: 5; width: 350px; max-height: calc(100% - 20px); overflow: auto;
   background: rgba(255,255,255,0.96); border-radius: 10px; box-shadow: 0 4px 18px rgba(0,0,0,0.25); padding: 10px 12px; font-size: 12.5px; }
 #sv-panel .sv-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 14px; }
 #sv-panel .sv-sub, #sv-panel .sv-label { color: #5b6b7c; margin: 4px 0; }
@@ -105,5 +105,25 @@ ul.why li span { flex: none; width: 12px; text-align: center; }
 #sv-panel li { margin: 2px 0; }
 #sv-panel .sv-legend { display: flex; flex-wrap: wrap; gap: 4px 8px; color: #5b6b7c; margin-top: 6px; }
 #sv-panel .sv-legend span { display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: var(--c); margin-right: 2px; }
+#sv-panel .sv-wind { background: #f1f6fa; border-radius: 8px; padding: 6px 8px; margin: 6px 0; }
+#sv-panel .sv-wind label { display: block; margin: 2px 0; }
+#sv-panel .sv-wind label small { color: #5b6b7c; }
+#sv-panel .sv-wind input[type=range] { width: 100%; margin: 2px 0 4px; }
+#sv-panel .sv-verdict { font-weight: 600; margin: 2px 0 4px; }
+#sv-panel .sv-good { color: #1f7a3d; } #sv-panel .sv-warn { color: #b26a00; } #sv-panel .sv-bad { color: #c62828; }
+#sv-panel .sv-dirs { align-items: center; }
+#sv-panel .sv-dirs > span { color: #5b6b7c; margin-right: 2px; }
+#sv-panel .sv-dirs button { flex-direction: row; gap: 3px; min-width: 0; padding: 2px 6px; }
+#sv-panel .sv-steps { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; margin: 6px 0; }
+#sv-panel .sv-steps button { text-align: left; padding: 4px 6px; font-size: 11.5px; line-height: 1.2; }
+#sv-panel .sv-steps button span { display: inline-block; width: 16px; height: 16px; border-radius: 50%; background: #d6e4ef; text-align: center; font-size: 10.5px; line-height: 16px; margin-right: 4px; }
+#sv-panel .sv-steps button.on { background: #12658f; color: #fff; }
+#sv-panel .sv-steps button.on span { background: #fff; color: #12658f; }
+#sv-panel .sv-card { border: 1px solid #d6e4ef; border-radius: 8px; padding: 6px 10px; }
+#sv-panel .sv-card h4 { margin: 2px 0 4px; font-size: 14px; color: #12658f; }
+#sv-panel .sv-card p { margin: 4px 0; line-height: 1.4; }
+#sv-panel .sv-nav { display: flex; justify-content: space-between; gap: 6px; margin-top: 6px; }
+#sv-panel .sv-more { margin: 6px 0; } #sv-panel .sv-more summary { cursor: pointer; color: #12658f; }
+#sv-panel .sv-note { color: #8a97a5; font-size: 11px; margin-top: 4px; }
 @media (max-width: 600px) { #sv-panel { width: auto; right: 10px; max-height: 45%; } }
 .maplibregl-popup-content .pop { max-height: min(70vh, 640px); overflow-y: auto; }
