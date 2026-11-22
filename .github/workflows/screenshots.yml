@@ -4,6 +4,9 @@ on:
   push:
     paths: ["src/**", "index.html", "tools/screenshots.cjs", ".github/workflows/screenshots.yml"]
 
+permissions:
+  contents: write
+
 jobs:
   screenshots:
     runs-on: ubuntu-latest
@@ -24,3 +27,15 @@ jobs:
         with:
           name: screenshots
           path: screenshots/*.png
+      - name: Publish to the screenshots branch
+        run: |
+          set -e
+          sha=${GITHUB_SHA::7}
+          mkdir -p /tmp/shots && cp screenshots/*.png /tmp/shots/
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin screenshots || true
+          if git rev-parse --verify origin/screenshots >/dev/null 2>&1; then git checkout -f -B screenshots origin/screenshots; else git checkout -f --orphan screenshots && git rm -rfq . ; fi
+          git clean -fdxq -e node_modules
+          mkdir -p "$sha" && cp /tmp/shots/*.png "$sha/"
+          git add "$sha" && git commit -qm "Screenshots for $sha" && git push origin screenshots

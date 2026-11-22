@@ -31,8 +31,10 @@ export const ASSETS = {
   sprite: 'https://protomaps.github.io/basemaps-assets/sprites/v4/light',
 };
 
-const BUILDS_URL = 'https://build-metadata.protomaps.dev/builds.json';
-const BUILD_BASE = 'https://build.protomaps.com/';
+// The desktop app fetches these natively; a plain browser goes through the
+// dev server's proxy (vite.config.js), as the host sends no CORS headers.
+const BUILDS_URL = backend.isTauri ? 'https://build-metadata.protomaps.dev/builds.json' : '/protomaps-meta/builds.json';
+const BUILD_BASE = backend.isTauri ? 'https://build.protomaps.com/' : new URL('/protomaps/', location.href).href;
 
 export const status = { online: navigator.onLine, lastError: null };
 window.addEventListener('online', () => (status.online = true));
