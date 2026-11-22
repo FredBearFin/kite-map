@@ -1280,4 +1280,16 @@ function toast(msg, ms = 4000) {
   toastTimer = setTimeout(() => (t.hidden = true), ms);
 }
 
-window.__kite = { state, map, status, backend };
+window.__kite = {
+  state, map, status, backend,
+  // Used by tools/screenshots.cjs to show a discovered spot.
+  spotPopup: (i = 0) => { const sp = state.spots[i]; if (sp) showSpotPopup(sp.raw, sp.c.lon, sp.c.lat, 'Launch spot'); },
+  spotView: async (i = 0) => {
+    const sp = state.spots[i];
+    if (!sp) return false;
+    await preloadWind([[sp.c.lat, sp.c.lon]]);
+    const wind = windAt(sp.c.lat, sp.c.lon);
+    open3d('Launch spot', sp.raw, scoreSite(sp.raw, wind, state.mode), wind, sp.c.lat, sp.c.lon);
+    return true;
+  },
+};
