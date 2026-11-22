@@ -132,8 +132,10 @@ export function enterSpotView(map, opts) {
     opts.forecastNow().then((now) => {
       if (!now || !state) return;
       state.live = now;
+      const kiteable = now.kn >= 12 && now.kn <= 35;
+      const d = kiteable ? Math.round(now.dir / 22.5) % 16 : state.d;
       buildPanel();
-      setDir(Math.round(now.dir / 22.5) % 16, false);
+      setDir(d, false);
     }).catch(() => {});
   }
 }

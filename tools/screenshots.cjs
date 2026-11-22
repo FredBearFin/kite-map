@@ -7,6 +7,22 @@ const fs = require('fs');
 const out = process.argv[2] || 'screenshots';
 const PLACE = { name: 'lake-mcconaughy', center: [-101.74, 41.235], zoom: 11.3 };
 
+// Wait until the camera has stopped and every tile (terrain too) has drawn.
+async function waitIdle(page, ms = 240000) {
+  await page.waitForTimeout(3000);
+  const t0 = Date.now();
+  const ok = await page.evaluate((ms) => new Promise((resolve) => {
+    const m = window.__kite.map;
+    const done = () => resolve(true);
+    const check = () => (!m.isMoving() && m.loaded() && m.areTilesLoaded() ? done() : m.once('idle', check));
+    setTimeout(() => resolve(false), ms);
+    m.triggerRepaint();
+    check();
+  }), ms);
+  await page.waitForTimeout(4000);
+  console.log(`idle ${ok} after ${((Date.now() - t0) / 1000).toFixed(0)} s`);
+}
+
 (async () => {
   fs.mkdirSync(out, { recursive: true });
   const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
@@ -31,12 +47,12 @@ const PLACE = { name: 'lake-mcconaughy', center: [-101.74, 41.235], zoom: 11.3 }
   await page.screenshot({ path: `${out}/2-spot-popup.png` });
 
   await page.evaluate(() => window.__kite.spotView(0));
-  await page.waitForTimeout(45000);
+  await waitIdle(page);
   await page.screenshot({ path: `${out}/3-spot-3d.png` });
 
   // Look around: turn right and show another wind direction.
   await page.evaluate(() => document.querySelectorAll('#sv-panel .sv-dirs button')[1]?.click());
-  await page.waitForTimeout(30000);
+  await waitIdle(page);
   await page.screenshot({ path: `${out}/4-spot-3d-other-wind.png` });
   await browser.close();
 })();

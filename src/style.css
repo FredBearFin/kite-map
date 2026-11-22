@@ -106,3 +106,4 @@ ul.why li span { flex: none; width: 12px; text-align: center; }
 #sv-panel .sv-legend { display: flex; flex-wrap: wrap; gap: 4px 8px; color: #5b6b7c; margin-top: 6px; }
 #sv-panel .sv-legend span { display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: var(--c); margin-right: 2px; }
 @media (max-width: 600px) { #sv-panel { width: auto; right: 10px; max-height: 45%; } }
+.maplibregl-popup-content .pop { max-height: min(70vh, 640px); overflow-y: auto; }

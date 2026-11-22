@@ -87,7 +87,7 @@ export function explain(s, raw, mode = 'water', props = {}) {
     if (!b) continue;
     const f = Math.min(b.fa, b.fc, Math.sqrt(b.fr), b.fx);
     let why;
-    if (f === b.fa) why = `the wind is ${angleWord(b.th)} at every shore here`;
+    if (f === b.fa) why = `the wind is ${angleWord(b.th)} ${raw.cand.length > 1 ? 'at every shore here' : 'at this launch'}`;
     else if (f === b.fc) {
       why = b.sh > 50 && b.sh > 0.3 * b.W
         ? `${SOURCE_NAMES[b.src]} on the upwind shore (about ${b.shH} m high) leave it gusty for ${fmtM(b.sh)}, with only ${fmtM(b.W)} of water`
