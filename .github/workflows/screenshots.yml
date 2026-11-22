@@ -19,6 +19,11 @@ jobs:
       - run: npm ci
       - run: npm install --no-save playwright@1.63.0 && npx playwright install --with-deps chromium
       - run: npx vite build
+      - name: Check the forecast service is reachable
+        run: |
+          for u in "https://api.open-meteo.com/v1/forecast?latitude=41.2&longitude=-101.7&hourly=wind_speed_10m&forecast_days=1" "https://archive-api.open-meteo.com/v1/archive?latitude=41.2&longitude=-101.7&start_date=2025-01-01&end_date=2025-01-02&hourly=wind_speed_10m" "https://api.met.no/weatherapi/locationforecast/2.0/compact?lat=41.2&lon=-101.7"; do
+            curl -sS -m 25 -A "kite-map-ci/1.0 github.com/FredBearFin/kite-map" -o /dev/null -w "%{http_code} %{time_total}s $u\n" "$u" || echo "FAILED $u"
+          done
       - run: |
           npx vite preview --port 4173 &
           sleep 3

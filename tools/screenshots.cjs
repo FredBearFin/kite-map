@@ -106,9 +106,10 @@ async function snap3d(page, path) {
   // red rings and lower scores where the shore is private.
   await page.evaluate(() => { document.querySelector('#tabs button[data-tab="spots"]').click(); window.__kite.state.fcDay = null; window.__kite.map.jumpTo({ center: [-95.16, 43.37], zoom: 12.2 }); });
   await page.waitForTimeout(5000);
-  await page.waitForFunction(() => document.getElementById('banner').hidden, null, { timeout: 240000, polling: 2000 }).catch(() => {});
-  await page.waitForTimeout(25000);
-  console.log('okoboji access', await page.evaluate(() => window.__kite.state.spots.slice(0, 12).map((s) => `${s.score}/${s.base} ${s.access?.level}`)));
+  await page.waitForFunction(() => window.__kite.state.spots.length >= 8 && document.getElementById('banner').hidden, null, { timeout: 300000, polling: 3000 }).catch(() => console.log('okoboji scan slow'));
+  await page.waitForFunction(() => window.__kite.state.spots.slice(0, 10).every((s) => s.access), null, { timeout: 180000, polling: 3000 }).catch(() => console.log('okoboji access slow'));
+  await page.waitForTimeout(5000);
+  console.log('okoboji access', JSON.stringify(await page.evaluate(() => window.__kite.state.spots.slice(0, 14).map((s) => `${s.score}/${s.base} ${s.access?.level} ${s.access?.items.map((i) => i.kind).join('/')}`))));
   await page.screenshot({ path: `${out}/6-access-map.png` });
   const lim = await page.evaluate(() => window.__kite.state.spots.findIndex((s) => s.access && s.access.level !== 'public'));
   if (lim >= 0) {
