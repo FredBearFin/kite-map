@@ -1,0 +1,21 @@
+name: Spot scoring check
+
+on:
+  push:
+    paths: ["src/**", "tools/**", ".github/workflows/calibrate.yml"]
+
+jobs:
+  calibrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: node tools/calibrate.mjs calibration.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: calibration
+          path: calibration.json
