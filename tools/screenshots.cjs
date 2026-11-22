@@ -57,14 +57,17 @@ async function waitIdle(page, ms = 240000) {
   await page.screenshot({ path: `${out}/4-spot-3d-other-wind.png` });
   // Diagnostics for the 3D view: turn layers off one group at a time.
   const steps = [
-    ['d1-no-extrusions', () => ['sv-trees', 'sv-buildings'].forEach((id) => window.__kite.map.setLayoutProperty(id, 'visibility', 'none'))],
-    ['d2-no-satellite', () => window.__kite.map.setLayoutProperty('satellite', 'visibility', 'none')],
-    ['d3-no-terrain', () => window.__kite.map.setTerrain(null)],
+    ['e1-no-sky', () => window.__kite.map.setSky({})],
+    ['e2-no-hillshade', () => window.__kite.map.setLayoutProperty('hillshade', 'visibility', 'none')],
+    ['e3-camera-higher', () => window.__kite.map.jumpTo({ zoom: 14, pitch: 60 })],
+    ['e4-no-vector', () => { const m = window.__kite.map; for (const l of m.getStyle().layers) if (l.source === 'protomaps') m.setLayoutProperty(l.id, 'visibility', 'none'); }],
+    ['e5-flat', () => window.__kite.map.setTerrain({ source: 'dem3d', exaggeration: 0.01 })],
+    ['e6-no-terrain', () => window.__kite.map.setTerrain(null)],
   ];
   for (const [name, fn] of steps) {
     await page.evaluate(fn);
     await waitIdle(page, 60000);
-    console.log(name, await page.evaluate(() => { const m = window.__kite.map; return JSON.stringify({ terrain: !!m.getTerrain(), pitch: m.getPitch(), zoom: m.getZoom(), layers: m.getStyle().layers.length }); }));
+    console.log(name, await page.evaluate(() => { const m = window.__kite.map; const gl = m.painter?.context?.gl; const t = m.terrain; return JSON.stringify({ terrain: !!m.getTerrain(), pitch: m.getPitch(), zoom: m.getZoom(), glErr: gl?.getError(), lost: gl?.isContextLost(), demTiles: t?.sourceCache?._tiles ? Object.keys(t.sourceCache._tiles).length : null, camAlt: m.transform?.getCameraAltitude?.(), elev: m.transform?.elevation, center: m.getCenter() }); }));
     await page.screenshot({ path: `${out}/${name}.png` });
   }
   await browser.close();
