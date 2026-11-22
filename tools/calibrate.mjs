@@ -53,7 +53,8 @@ async function getWind(lat, lon, grid = 1) {
   const url = `https://archive-api.open-meteo.com/v1/archive?latitude=${glat}&longitude=${glon}&start_date=${year}-01-01&end_date=${year}-12-31` +
     `&hourly=wind_speed_10m,wind_direction_10m,temperature_2m&wind_speed_unit=kn&timezone=auto&timeformat=unixtime`;
   for (let a = 0; a < 4; a++) {
-    const r = await fetch(url);
+    // A network hiccup throws instead of returning an error status: retry it too.
+    const r = await fetch(url).catch((e) => ({ ok: false, err: e }));
     if (r.ok) {
       const j = await r.json();
       const off = j.utc_offset_seconds || 0;
