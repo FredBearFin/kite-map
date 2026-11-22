@@ -121,6 +121,16 @@ export function enterSpotView(map, opts) {
   map.setMaxPitch(85);
   map.setTerrain({ source: 'dem3d', exaggeration: 1.4 });
   map.setLayoutProperty('satellite', 'visibility', 'visible');
+  // Let the satellite show through the flat map-colour water.
+  if (!saved.water) {
+    saved.water = [];
+    for (const l of map.getStyle().layers) {
+      if (l.type === 'fill' && l['source-layer'] === 'water') {
+        saved.water.push([l.id, map.getPaintProperty(l.id, 'fill-opacity')]);
+        map.setPaintProperty(l.id, 'fill-opacity', 0.15);
+      }
+    }
+  }
   try { map.setSky({ 'sky-color': '#8cc4ef', 'horizon-color': '#dceefc', 'fog-color': '#e8f2fa', 'sky-horizon-blend': 0.6, 'horizon-fog-blend': 0.5, 'fog-ground-blend': 0.6 }); } catch {}
 
   const H = opts.s.hours || new Array(16).fill(1);
@@ -145,6 +155,7 @@ export function exitSpotView() {
   const { map } = state;
   for (const id of SV_LAYERS) if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'none');
   map.setTerrain(null);
+  for (const [id, op] of saved.water || []) map.setPaintProperty(id, 'fill-opacity', op ?? 1);
   map.setLayoutProperty('satellite', 'visibility', saved.sat || 'none');
   map.setMaxPitch(saved.maxPitch);
   map.easeTo({ ...saved.camera, padding: { left: 0, top: 0, right: 0, bottom: 0 }, duration: 800 });
