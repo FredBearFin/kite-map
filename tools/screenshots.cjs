@@ -106,12 +106,13 @@ async function snap3d(page, path) {
   // red rings and lower scores where the shore is private.
   await page.evaluate(() => { document.querySelector('#tabs button[data-tab="spots"]').click(); window.__kite.state.fcDay = null; window.__kite.map.jumpTo({ center: [-95.16, 43.37], zoom: 12.2 }); });
   await page.waitForTimeout(5000);
-  await page.waitForFunction(() => window.__kite.state.spots.length >= 8 && document.getElementById('banner').hidden, null, { timeout: 300000, polling: 3000 }).catch(() => console.log('okoboji scan slow'));
-  await page.waitForFunction(() => window.__kite.state.spots.slice(0, 10).every((s) => s.access), null, { timeout: 180000, polling: 3000 }).catch(() => console.log('okoboji access slow'));
+  const inView = () => { const b = window.__kite.map.getBounds(); return window.__kite.state.spots.filter((s) => b.contains([s.c.lon, s.c.lat])); };
+  await page.waitForFunction(`(${inView})().length >= 6 && document.getElementById('banner').hidden`, null, { timeout: 420000, polling: 3000 }).catch(() => console.log('okoboji scan slow'));
+  await page.waitForFunction(`(${inView})().every((s) => s.access)`, null, { timeout: 240000, polling: 3000 }).catch(() => console.log('okoboji access slow'));
   await page.waitForTimeout(5000);
-  console.log('okoboji access', JSON.stringify(await page.evaluate(() => window.__kite.state.spots.slice(0, 14).map((s) => `${s.score}/${s.base} ${s.access?.level} ${s.access?.items.map((i) => i.kind).join('/')}`))));
+  console.log('okoboji access', JSON.stringify(await page.evaluate(`(${inView})().map((s) => s.score + '/' + s.base + ' ' + s.access?.level + ' ' + s.access?.items.map((i) => i.kind).join('/'))`)));
   await page.screenshot({ path: `${out}/6-access-map.png` });
-  const lim = await page.evaluate(() => window.__kite.state.spots.findIndex((s) => s.access && s.access.level !== 'public'));
+  const lim = await page.evaluate(`(() => { const v = (${inView})(); const s = v.find((x) => x.access && x.access.level !== 'public') || v.find((x) => x.access && x.access.factor < 1); return s ? window.__kite.state.spots.indexOf(s) : -1; })()`);
   if (lim >= 0) {
     await page.evaluate((i) => window.__kite.spotPopup(i), lim);
     await page.waitForSelector('.pop .access .why', { timeout: 90000 }).catch(() => {});
